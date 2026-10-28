@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bilimuse"
+version = "0.1.0"
+description = "BiliMuse —— 把 B 站收藏夹变成私人音乐库，内置 BTR 多线程 / 多 CDN 流式加速"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Jackiechen259" }]
+keywords = ["bilibili", "music-player", "btr", "multi-cdn", "range-request"]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "httpx>=0.27",
+    "segno>=1.5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+bilimuse = "bilimuse.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["bilimuse*"]
+
+[tool.setuptools.package-data]
+bilimuse = ["web/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

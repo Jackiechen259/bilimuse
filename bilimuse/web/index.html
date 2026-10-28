@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BiliMuse · 收藏夹音乐库</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">♪</div>
+        <div>
+          <h1>BiliMuse</h1>
+          <p>把收藏夹变成歌单</p>
+        </div>
+      </div>
+
+      <div class="account" id="account">
+        <div class="avatar" id="avatar">B</div>
+        <div class="account-text">
+          <div id="account-name">未登录</div>
+          <div class="muted small" id="account-hint">扫码登录后读取你的收藏夹</div>
+        </div>
+        <button class="ghost" id="login-btn">登录</button>
+      </div>
+
+      <div class="section-title">收藏夹<span id="folder-count"></span></div>
+      <nav class="folders" id="folders">
+        <div class="skeleton"></div>
+        <div class="skeleton"></div>
+      </nav>
+
+      <div class="spacer"></div>
+
+      <div class="panel">
+        <div class="panel-row">
+          <div>
+            <div class="panel-label">BTR 多线程</div>
+            <div class="muted small">多连接 / 多 CDN 分段拉流</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="btr-toggle" checked />
+            <span></span>
+          </label>
+        </div>
+        <div class="panel-row">
+          <span class="panel-label">并发数</span>
+          <select id="concurrency">
+            <option value="2">2</option>
+            <option value="4">4</option>
+            <option value="8" selected>8</option>
+            <option value="12">12</option>
+            <option value="16">16</option>
+            <option value="24">24</option>
+            <option value="32">32</option>
+          </select>
+        </div>
+        <div class="hint" id="engine-hint">引擎待连接</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="titles">
+          <h2 id="folder-title">选择一个收藏夹</h2>
+          <p class="muted" id="folder-meta">登录后这里会列出你的收藏夹</p>
+        </div>
+        <div class="search">
+          <input id="search" placeholder="在收藏夹内搜索…" autocomplete="off" />
+        </div>
+      </header>
+
+      <section class="list-head">
+        <span>#</span><span>标题</span><span>UP主</span><span>时长</span>
+      </section>
+
+      <section id="tracks" class="tracks"></section>
+      <div id="empty" class="empty hidden">
+        <div class="empty-icon">🎧</div>
+        <p id="empty-text">还没有内容</p>
+      </div>
+    </main>
+  </div>
+
+  <footer class="player">
+    <div class="now">
+      <div class="now-cover" id="now-cover">♪</div>
+      <div class="now-text">
+        <div id="now-title">未在播放</div>
+        <div class="muted small" id="now-sub">选择一首开始</div>
+      </div>
+      <div class="badge" id="quality">—</div>
+    </div>
+
+    <div class="controls">
+      <div class="buttons">
+        <button id="prev" title="上一首">⏮</button>
+        <button id="play" class="play" title="播放 / 暂停">▶</button>
+        <button id="next" title="下一首">⏭</button>
+      </div>
+      <div class="seek-row">
+        <span class="time" id="t-cur">0:00</span>
+        <div class="seek" id="seek">
+          <div class="seek-buf" id="seek-buf"></div>
+          <div class="seek-fill" id="seek-fill"></div>
+          <div class="seek-knob" id="seek-knob"></div>
+        </div>
+        <span class="time" id="t-dur">0:00</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="stats" id="stats">BTR 待机</div>
+      <div class="volume">
+        <span>🔊</span>
+        <input id="volume" type="range" min="0" max="1" step="0.01" value="0.9" />
+      </div>
+    </div>
+  </footer>
+
+  <div class="modal hidden" id="login-modal">
+    <div class="modal-card">
+      <button class="close" id="close-modal">✕</button>
+      <h3>扫码登录</h3>
+      <p class="muted">用 B 站手机客户端扫码，登录态只保存在本机 <code>~/.config/bilimuse/</code></p>
+      <div class="qr-wrap">
+        <img id="qr-img" alt="登录二维码" />
+        <div class="qr-mask hidden" id="qr-mask"><span id="qr-mask-text">刷新</span></div>
+      </div>
+      <p class="status" id="qr-status">正在生成二维码…</p>
+    </div>
+  </div>
+
+  <audio id="audio" preload="auto"></audio>
+  <script src="/app.js"></script>
+</body>
+</html>
