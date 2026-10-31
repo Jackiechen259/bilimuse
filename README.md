@@ -11,7 +11,7 @@ BiliMuse 把这两件事一起解决：扫码登录后直接列出你的收藏�
 
 ## 特性
 
-- **扫码登录**：调 B 站官方二维码接口，登录态只写本机 `~/.config/bilimuse/session.json`（权限 0600），不碰密码
+- **多种登录方式**：扫码，或在桌面版里用账号密码 / 手机验证码登录（内嵌 B 站官方登录页完成极验人机验证，只接收登录 cookie，不保存密码）；登录态只写本机 `~/.config/bilimuse/session.json`（权限 0600）
 - **收藏夹即歌单**：列出全部收藏夹、支持夹内搜索、顺序/循环播放、上一首下一首、空格键控制
 - **音质优先**：Hi-Res 无损 → 杜比全景声 → 最高码率（192K/132K/64K），有无损就播无损
 - **BTR 引擎**：多 Range 并发、多 CDN 节点竞速、慢块对冲、断点续传、按实时速度加权调度
@@ -19,9 +19,9 @@ BiliMuse 把这两件事一起解决：扫码登录后直接列出你的收藏�
 - **自适应并发**：节点本来就快时自动少开连接（握手也是成本），单连接被限速时才拉满
 - **实时指标**：并发数、命中节点、块进度、瞬时速度、对冲次数，播放器右下角直接可见
 - **演示模式**：不登录也能跑通整条链路 —— 本地合成三段音频，每条连接限速 320 KB/s，直观对比开关 BTR 的差别
-- **桌面版**：Tauri v2 原生窗口 + 打包好的 Python 引擎（边车），不用开浏览器，关窗即退出
+- **桌面版**：Tauri v2 原生窗口 + 打包好的 Python 引擎（边车），不用开浏览器，关窗即退出；支持扫码、账号密码和短信验证码三种登录
 - **安卓版**：Kotlin + Compose + Media3 原生 App，BTR 引擎直接作为 ExoPlayer 的 DataSource，支持后台播放、通知栏/锁屏控制和演示模式
-- **多种登录方式（安卓）**：原生扫码，或账号密码 / 手机验证码登录（在 App 内嵌的 B 站官方登录页完成极验人机验证，App 只接收登录 cookie，不保存密码）
+- **多种登录方式（安卓 / 桌面）**：原生扫码，或账号密码 / 手机验证码登录（在内嵌的 B 站官方登录页完成极验人机验证，只接收登录 cookie，不保存密码）
 - **零构建**：网页版是 FastAPI + 原生 HTML/CSS/JS，没有 npm、没有打包步骤
 
 ## 快速开始
@@ -83,8 +83,15 @@ sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
   libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 ```
 
+登录方式：点「登录」后可以扫码，也可以切到**账号密码**或**短信验证码**。
+后两种由桌面壳打开一个独立的 B 站官方 H5 登录窗口（极验人机验证在官方页面里完成），
+窗口使用不落地的 incognito 会话；登录成功后桌面壳只读取 `.bilibili.com` 的 cookie
+交给边车校验，密码不经过 BiliMuse 代码。
+
 演示模式：`npm run dev -- -- --demo`（或 `BILIMUSE_DEMO=1 npm run dev`）。
-架构、打包细节、平台差异和故障排查见 [docs/DESKTOP.md](docs/DESKTOP.md)。
+桌面版内置基于 GitHub Releases 的自动更新：应用会定期检查新版本，确认后下载并
+校验签名安装包，重启即生效。发布流程、签名密钥和平台差异见
+[docs/DESKTOP.md](docs/DESKTOP.md#自动更新github-releases)。
 
 ## 安卓版
 
@@ -178,7 +185,7 @@ bilimuse/
 │   ├── api.py          # B 站 Web API：扫码登录、收藏夹、playurl（含 WBI 签名）
 │   ├── auth.py         # 登录态本地存储（0600）
 │   ├── btr.py          # BTR 引擎：节点探测、分块调度、对冲、续传
-│   ├── server.py       # FastAPI：登录 / 收藏夹 / 取流 / Range / 统计
+│   ├── server.py       # FastAPI：扫码 / 桌面官方窗口登录 / 收藏夹 / 取流 / Range / 统计
 │   ├── launcher.py     # 端口绑定 + uvicorn 启动（支持 --port 0 与桌面模式）
 │   ├── demo.py         # 演示音频合成（4 秒循环拼接，秒级生成）
 │   ├── config.py       # 配置与路径（含 PyInstaller 冻结路径）
@@ -186,7 +193,7 @@ bilimuse/
 │   └── __main__.py     # 命令行入口
 ├── desktop/            # Tauri v2 桌面壳（Rust + 启动页）
 │   ├── web/index.html  # 启动页
-│   └── src-tauri/      # 窗口、边车生命周期、打包配置、图标
+│   └── src-tauri/      # 窗口、边车生命周期、登录桥（login.rs）、打包配置、图标
 ├── android/            # 安卓版：Kotlin + Compose + Media3
 │   ├── app/src/main/kotlin/com/bilimuse/app/
 │   │   ├── btr/        # BTR 引擎 Kotlin 移植
@@ -206,6 +213,11 @@ bilimuse/
 | `GET` | `/api/state` | 登录态、版本、当前引擎设置 |
 | `POST` | `/api/login/qr` | 生成二维码（返回 SVG data URI） |
 | `GET` | `/api/login/poll?key=` | 轮询扫码状态：pending / scanned / success / expired |
+| `POST` | `/api/desktop/login/request` | 桌面版：发起官方登录窗口（`{"mode":"password"}` 或 `"sms"`） |
+| `GET` | `/api/desktop/login/pending` | 桌面壳：领取待打开的登录请求（无请求返回 204） |
+| `POST` | `/api/desktop/login/cookies` | 桌面壳：回传官方登录页的 cookie，校验并保存登录态 |
+| `GET` | `/api/desktop/login/status?request_id=` | 前端：轮询登录进度 |
+| `POST` | `/api/desktop/login/cancel` | 取消 / 关闭登录窗口 |
 | `POST` | `/api/logout` | 清本地登录态 |
 | `GET` | `/api/folders` | 收藏夹列表 |
 | `GET` | `/api/folder/{fid}?pn=&ps=&keyword=` | 收藏夹内容（分页 / 搜索） |
@@ -217,7 +229,13 @@ bilimuse/
 ## 测试
 
 ```bash
-.venv/bin/python -m pytest -q      # 23 passed
+.venv/bin/python -m pytest -q      # 31 passed
+```
+
+桌面登录桥（回环 HTTP 解析 / chunked / cookie 域过滤）另有 7 个 Rust 单元测试：
+
+```bash
+cd desktop/src-tauri && cargo test --release login
 ```
 
 安卓版的引擎、WBI 签名、演示 CDN 和音轨选择另有 15 个纯 JVM 测试（不需要模拟器）：
@@ -244,7 +262,8 @@ cd android && ./gradlew :app:testDebugUnitTest
 - [x] 桌面壳（Tauri v2 + Python 边车，见 `desktop/`）
 - [x] 安卓版（Kotlin + Compose + Media3，见 `android/`）
 - [ ] 桌面端单实例 / 托盘 / 全局快捷键（已接 Media Session，桌面壳再接一层）
-- [ ] 网页 / 桌面端的账号密码、短信登录（需要官方登录窗口 + cookie 交换，安卓版已支持）
+- [x] 桌面端的账号密码 / 短信验证码登录（桌面壳内嵌官方登录窗口 + cookie 交换，见 `desktop/src-tauri/src/login.rs`）
+- [ ] 网页版的账号密码 / 短信登录（需要常驻浏览器壳；目前请扫码）
 
 ## 声明
 

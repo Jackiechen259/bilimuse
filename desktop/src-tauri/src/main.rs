@@ -13,6 +13,9 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod login;
+mod update;
+
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -21,7 +24,7 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use tauri::{RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 const READY_PREFIX: &str = "BILIMUSE_PORT=";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(40);
@@ -29,6 +32,8 @@ const LOG_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 fn main() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // 窗口自己建，这样能先给用户一个启动页，而不是等 Python 起来才见窗口
             let window =
@@ -43,6 +48,9 @@ fn main() {
                 || std::env::var("BILIMUSE_DEMO").as_deref() == Ok("1");
 
             thread::spawn(move || start_backend(&window, demo));
+
+            // 独立线程里静默检查 GitHub Release；不阻塞启动，也不影响本地引擎。
+            update::start(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -123,7 +131,7 @@ fn log_file() -> PathBuf {
     path
 }
 
-fn append_log(message: &str) {
+pub(crate) fn append_log(message: &str) {
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -272,6 +280,8 @@ fn terminate(child: &mut Child) {
 fn start_backend(window: &WebviewWindow, demo: bool) {
     match spawn_backend(demo) {
         Ok(port) => {
+            // 账号密码 / 短信验证码登录：等本地引擎开始 accept 后再接桥
+            login::run(window.app_handle().clone(), port);
             let url = format!("http://127.0.0.1:{port}/");
             match url.parse::<Url>() {
                 Ok(url) => {

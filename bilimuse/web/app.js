@@ -6,13 +6,18 @@ const $ = (id) => document.getElementById(id);
 const state = {
   user: null,
   demo: false,
+  desktop: false,     // 桌面壳模式：可使用账号密码 / 短信验证码登录
   folders: [],
   folderId: null,
   tracks: [],
   index: -1,
   current: null,      // 当前 track 元数据（含 stream id）
   statsTimer: null,
-  pollTimer: null,
+  pollTimer: null,    // 扫码轮询
+  desktopTimer: null, // 桌面登录窗口状态轮询
+  desktopLogin: null, // { id, mode }
+  desktopMode: 'sms',
+  loginMode: 'qr',    // 当前登录弹窗的 tab：qr / password / sms
   settings: { btr_enabled: true, concurrency: 8 },
   playToken: 0,
 };
@@ -71,7 +76,9 @@ function renderAccount() {
   $('account-name').textContent = u.logged_in ? (u.uname || `UID ${u.mid}`) : '未登录';
   $('account-hint').textContent = u.logged_in
     ? (u.vip ? '大会员 · 可听 Hi-Res' : '已登录')
-    : (state.demo ? '演示模式，无需登录' : '扫码登录后读取你的收藏夹');
+    : (state.demo
+      ? '演示模式，无需登录'
+      : (state.desktop ? '扫码 / 密码 / 短信登录' : '扫码登录后读取你的收藏夹'));
   $('login-btn').textContent = u.logged_in ? '切换' : '登录';
   const avatar = $('avatar');
   if (u.face) {
@@ -359,19 +366,72 @@ function setupSeek() {
 
 /* ------------------------------------------------------------------ 登录 */
 
+function setLoginTab(mode) {
+  document.querySelectorAll('.login-tab').forEach((el) => {
+    el.classList.toggle('active', el.dataset.mode === mode);
+  });
+}
+
+function setLoginPanel(mode) {
+  const isQr = mode === 'qr';
+  state.loginMode = mode;
+  $('login-qr-panel').classList.toggle('hidden', !isQr);
+  $('login-window-panel').classList.toggle('hidden', isQr);
+  if (isQr) {
+    $('login-title').textContent = '扫码登录';
+    $('login-sub').innerHTML = '用 B 站手机客户端扫码，登录态只保存在本机 <code>~/.config/bilimuse/</code>';
+  } else {
+    $('login-title').textContent = mode === 'password' ? '账号密码登录' : '短信验证码登录';
+    $('login-sub').textContent = '在独立窗口里完成 B 站官方登录，登录态只保存在本机';
+    state.desktopMode = mode;
+  }
+}
+
 async function openLogin() {
   $('login-modal').classList.remove('hidden');
+  $('login-tabs').classList.toggle('hidden', !state.desktop);
+  await beginQrLogin();
+}
+
+async function beginQrLogin() {
+  await cancelDesktopLogin();
+  setLoginTab('qr');
+  setLoginPanel('qr');
   $('qr-mask').classList.add('hidden');
   $('qr-status').textContent = '正在生成二维码…';
   $('qr-img').removeAttribute('src');
+  clearInterval(state.pollTimer);
   try {
     const data = await api('/api/login/qr', { method: 'POST' });
+    // 生成二维码期间用户可能已经关掉弹窗 / 切到别的登录方式
+    if (state.loginMode !== 'qr' || $('login-modal').classList.contains('hidden')) return;
     $('qr-img').src = data.qr;
     $('qr-status').textContent = '请用 B 站 App 扫码';
     pollLogin(data.key);
   } catch (err) {
     $('qr-status').textContent = `二维码生成失败：${err.message}`;
   }
+}
+
+/** 登录成功（含切换账号）：清掉上一个账号的收藏夹/播放列表。 */
+function afterLogin(user) {
+  state.user = user;
+  state.folderId = null;
+  state.tracks = [];
+  state.index = -1;
+  state.current = null;
+  state.playToken += 1;      // 让上一个账号正在解析的音轨作废
+  const audio = $('audio');
+  audio.pause();
+  audio.removeAttribute('src');
+  audio.load();
+  stopStats();
+  $('now-title').textContent = '未在播放';
+  $('now-sub').textContent = '选择一首开始';
+  $('quality').textContent = '—';
+  $('stats').textContent = 'BTR 待机';
+  renderAccount();
+  renderTracks();
 }
 
 function pollLogin(key) {
@@ -382,8 +442,7 @@ function pollLogin(key) {
       $('qr-status').textContent = res.message || '等待扫码';
       if (res.status === 'success') {
         clearInterval(state.pollTimer);
-        state.user = res.user;
-        renderAccount();
+        afterLogin(res.user);
         closeLogin();
         await loadFolders();
       } else if (res.status === 'expired') {
@@ -397,8 +456,91 @@ function pollLogin(key) {
   }, 2000);
 }
 
-function closeLogin() {
+async function beginDesktopLogin(mode) {
   clearInterval(state.pollTimer);
+  await cancelDesktopLogin();
+  setLoginTab(mode);
+  setLoginPanel(mode);
+  $('login-window-retry').classList.add('hidden');
+  $('login-window-status').textContent = '正在请求打开 B 站官方登录窗口…';
+  try {
+    const data = await api('/api/desktop/login/request', {
+      method: 'POST',
+      body: JSON.stringify({ mode }),
+    });
+    if (state.loginMode !== mode || $('login-modal').classList.contains('hidden')) {
+      // 请求期间用户已经关掉弹窗 / 换了登录方式：别留下一个没人管的登录窗口
+      try {
+        await api('/api/desktop/login/cancel', {
+          method: 'POST',
+          body: JSON.stringify({ request_id: data.request_id, message: '已关闭登录弹窗' }),
+        });
+      } catch (_) { /* ignore */ }
+      return;
+    }
+    state.desktopLogin = { id: data.request_id, mode: data.mode };
+    $('login-window-status').textContent = data.message || '正在打开登录窗口…';
+    pollDesktopLogin();
+  } catch (err) {
+    $('login-window-status').textContent = `无法打开登录窗口：${err.message}`;
+    $('login-window-retry').classList.remove('hidden');
+  }
+}
+
+function pollDesktopLogin() {
+  clearInterval(state.desktopTimer);
+  state.desktopTimer = setInterval(async () => {
+    const req = state.desktopLogin;
+    if (!req) return;
+    try {
+      const res = await api(
+        `/api/desktop/login/status?request_id=${encodeURIComponent(req.id)}`,
+      );
+      $('login-window-status').textContent = res.message || '等待在官方窗口完成登录…';
+      if (res.status === 'success') {
+        stopDesktopLogin();
+        state.desktopLogin = null;
+        afterLogin(res.user);
+        closeLogin(false);
+        await loadFolders();
+      } else if (['failed', 'cancelled', 'expired'].includes(res.status)) {
+        stopDesktopLogin();
+        state.desktopLogin = null;
+        $('login-window-retry').classList.remove('hidden');
+      }
+    } catch (err) {
+      stopDesktopLogin();
+      $('login-window-status').textContent = `登录状态查询失败：${err.message}`;
+      $('login-window-retry').classList.remove('hidden');
+    }
+  }, 1000);
+}
+
+function stopDesktopLogin() {
+  clearInterval(state.desktopTimer);
+  state.desktopTimer = null;
+}
+
+async function cancelDesktopLogin() {
+  const req = state.desktopLogin;
+  stopDesktopLogin();
+  state.desktopLogin = null;
+  if (!req) return;
+  try {
+    await api('/api/desktop/login/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ request_id: req.id, message: '已取消登录' }),
+    });
+  } catch (_) { /* 取消失败不打扰用户 */ }
+}
+
+function closeLogin(cancelDesktop = true) {
+  clearInterval(state.pollTimer);
+  if (cancelDesktop) cancelDesktopLogin();
+  else {
+    stopDesktopLogin();
+    state.desktopLogin = null;
+  }
   $('login-modal').classList.add('hidden');
 }
 
@@ -426,7 +568,9 @@ async function boot() {
     const data = await api('/api/state');
     state.user = data.user;
     state.demo = data.demo;
+    state.desktop = Boolean(data.desktop);
     state.settings = data.settings;
+    $('login-tabs').classList.toggle('hidden', !state.desktop);
     renderAccount();
     $('btr-toggle').checked = data.settings.btr_enabled;
     $('concurrency').value = String(data.settings.concurrency);
@@ -434,7 +578,9 @@ async function boot() {
       ? `BTR 已开启 · ${data.settings.concurrency} 并发`
       : 'BTR 已关闭，单连接直通';
     if (!data.user.logged_in && !data.demo) {
-      $('folder-meta').textContent = '还没有登录，点右上角「登录」扫码';
+      $('folder-meta').textContent = state.desktop
+        ? '还没有登录，点右上角「登录」扫码，或使用账号密码 / 短信验证码'
+        : '还没有登录，点右上角「登录」扫码';
       state.folderId = null;
       renderTracks();
       return;
@@ -449,11 +595,23 @@ $('play').addEventListener('click', togglePlay);
 $('prev').addEventListener('click', () => playNext(-1));
 $('next').addEventListener('click', () => playNext(1));
 $('login-btn').addEventListener('click', openLogin);
-$('close-modal').addEventListener('click', closeLogin);
+$('close-modal').addEventListener('click', () => closeLogin());
 $('login-modal').addEventListener('click', (evt) => {
   if (evt.target === $('login-modal')) closeLogin();
 });
-$('qr-mask').addEventListener('click', openLogin);
+$('qr-mask').addEventListener('click', beginQrLogin);
+document.querySelectorAll('.login-tab').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.mode === 'qr') beginQrLogin();
+    else beginDesktopLogin(btn.dataset.mode);
+  });
+});
+$('login-window-cancel').addEventListener('click', async () => {
+  $('login-window-status').textContent = '正在取消…';
+  await cancelDesktopLogin();
+  closeLogin(false);
+});
+$('login-window-retry').addEventListener('click', () => beginDesktopLogin(state.desktopMode));
 $('btr-toggle').addEventListener('change', (evt) => saveSettings({ btr_enabled: evt.target.checked }));
 $('concurrency').addEventListener('change', (evt) => saveSettings({ concurrency: Number(evt.target.value) }));
 $('volume').addEventListener('input', (evt) => { $('audio').volume = Number(evt.target.value); });

@@ -49,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
     from . import server
 
     server.state.demo_mode = args.demo
+    # 官方登录窗口由桌面壳负责打开；网页版没有这层壳，相关接口直接 404
+    server.state.desktop_shell = desktop
 
     announce = None
     if not desktop:

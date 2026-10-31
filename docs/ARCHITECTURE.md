@@ -158,6 +158,23 @@ auto_concurrency = clamp(ceil(4MB/s ÷ 探测吞吐), 2, 用户设定值)
 BTR 的节点探测、抢跑、加权调度、对冲、续传、自适应并发都有 Kotlin 移植，并用
 MockWebServer 按连接限速做了字节一致性和提速测试。细节见 [ANDROID.md](ANDROID.md)。
 
+## 桌面版的账号密码 / 短信登录
+
+网页版只有扫码，因为浏览器里的页面没法读取 `.bilibili.com` 的 HttpOnly cookie；
+桌面壳补上了这一层：
+
+1. 页面点「账号密码 / 短信验证码」→ `POST /api/desktop/login/request`；
+2. Rust 侧登录桥轮询 `/api/desktop/login/pending`，领到后创建一个**独立 incognito
+   webview** 加载 B 站官方 H5 登录页（账号密码、短信、极验都在官方页面里完成）；
+3. 登录桥每 700ms 用 Tauri 的 `cookies()` 读一次 cookie（能读 HttpOnly），按
+   `.bilibili.com` 过滤，看到 `SESSDATA` 就回传 `/api/desktop/login/cookies`；
+4. Python 侧先临时替换 cookie 调 `nav` 校验，成功才写 `session.json`，失败回滚；
+5. 登录窗口自动关闭，前端轮询 `/api/desktop/login/status` 看到 success 后刷新收藏夹。
+
+这条链路只存在于桌面版：边车带 `--desktop` 时 `state.desktop_shell=True`，否则
+`/api/desktop/login/*` 返回 404。桌面壳与边车之间走最小化的回环 HTTP 客户端，
+没有给加载远程页面的主窗口开放 Tauri IPC。细节见 [DESKTOP.md](DESKTOP.md)。
+
 ## 已知取舍
 
 - **按序输出 vs 全速下载**：当前窗口只预取播放位置之后的数据。要"整首缓存"就得放开窗口，但内存与磁盘策略会复杂很多，等有缓存需求再说。

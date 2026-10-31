@@ -39,6 +39,8 @@ def test_health_and_state(api):
 
     state = api.get("/api/state").json()
     assert state["demo"] is True
+    # 网页版没有桌面壳，账号密码 / 短信登录入口要隐藏
+    assert state["desktop"] is False
     assert "settings" in state and "version" in state
 
 

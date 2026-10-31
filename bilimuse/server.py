@@ -21,7 +21,7 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import auth, demo
 from .api import BiliClient, BiliError, NotLoggedIn, pick_audio
@@ -69,6 +69,36 @@ class Track:
         }
 
 
+@dataclass
+class DesktopLogin:
+    """桌面壳官方登录窗口的一次性会话。
+
+    前端发起 -> 桌面壳轮询领取并打开内嵌官方登录页 -> 壳读到 cookie 后回传。
+    id 是一次性随机串，避免前端拿错别的登录请求。
+    """
+
+    id: str
+    mode: str
+    status: str = "pending"
+    message: str = "正在打开 B 站官方登录窗口…"
+    user: dict[str, Any] | None = None
+    created: float = field(default_factory=time.time)
+    updated: float = field(default_factory=time.time)
+
+    def public(self) -> dict[str, Any]:
+        return {
+            "request_id": self.id,
+            "mode": self.mode,
+            "status": self.status,
+            "message": self.message,
+            "user": self.user,
+        }
+
+
+# 发起后多久还没被桌面壳领走就当作失败，避免前端一直转圈
+DESKTOP_LOGIN_CLAIM_TIMEOUT = 30.0
+
+
 class State:
     bili: BiliClient | None = None
     media: httpx.AsyncClient | None = None
@@ -78,6 +108,9 @@ class State:
     demo_mode: bool = False
     demo_files: dict[str, Path] = {}
     demo_bvid_to_idx: dict[str, int] = {}
+    # 桌面壳模式：只有边车带 --desktop 时，才允许通过官方登录窗口换 cookie
+    desktop_shell: bool = False
+    desktop_login: "DesktopLogin | None" = None
 
 
 state = State()
@@ -170,6 +203,7 @@ async def api_state() -> dict[str, Any]:
     return {
         "version": VERSION,
         "demo": state.demo_mode,
+        "desktop": state.desktop_shell,
         "user": user,
         "settings": {
             "btr_enabled": settings.btr_enabled,
@@ -214,6 +248,150 @@ async def api_login_poll(key: str = Query(..., min_length=8)) -> dict[str, Any]:
     return result
 
 
+# -------------------------------------------------- 桌面壳官方登录窗口（密码 / 短信）
+
+class DesktopLoginStart(BaseModel):
+    mode: str = "sms"
+
+
+class DesktopLoginCookies(BaseModel):
+    request_id: str
+    cookies: dict[str, str] = Field(default_factory=dict)
+
+
+class DesktopLoginCancel(BaseModel):
+    request_id: str
+    message: str = "已取消登录"
+
+
+def _require_desktop() -> None:
+    if not state.desktop_shell:
+        raise HTTPException(404, "账号密码 / 短信登录只在桌面版提供，网页版请扫码登录")
+
+
+@app.post("/api/desktop/login/request")
+async def api_desktop_login_request(payload: DesktopLoginStart) -> dict[str, Any]:
+    """前端发起一次官方登录窗口请求，桌面壳会轮询领取。"""
+    _require_desktop()
+    mode = payload.mode.strip().lower()
+    if mode not in {"password", "sms"}:
+        raise HTTPException(422, "mode 只能是 password 或 sms")
+    req = DesktopLogin(id=uuid.uuid4().hex, mode=mode)
+    state.desktop_login = req
+    return req.public()
+
+
+@app.get("/api/desktop/login/pending")
+async def api_desktop_login_pending() -> Any:
+    """桌面壳轮询：取走一个待打开的登录请求（取走即标记 claimed）。"""
+    _require_desktop()
+    req = state.desktop_login
+    if req is None or req.status != "pending":
+        return Response(status_code=204)
+    if time.time() - req.created > DESKTOP_LOGIN_CLAIM_TIMEOUT:
+        req.status = "expired"
+        req.message = "登录请求已超时，请重试"
+        req.updated = time.time()
+        return Response(status_code=204)
+    req.status = "claimed"
+    req.message = "已打开 B 站官方登录窗口，请在其中完成登录"
+    req.updated = time.time()
+    return {"request_id": req.id, "mode": req.mode}
+
+
+@app.get("/api/desktop/login/status")
+async def api_desktop_login_status(
+    request_id: str = Query(..., min_length=8),
+) -> dict[str, Any]:
+    """前端轮询登录进度。"""
+    _require_desktop()
+    req = state.desktop_login
+    if req is None or req.id != request_id:
+        return {
+            "request_id": request_id,
+            "mode": "",
+            "status": "expired",
+            "message": "登录请求已失效，请重新发起",
+            "user": None,
+        }
+    # 点了按钮但桌面壳一直没来领：别让前端无限转圈
+    if (
+        req.status == "pending"
+        and time.time() - req.created > DESKTOP_LOGIN_CLAIM_TIMEOUT
+    ):
+        req.status = "expired"
+        req.message = "登录窗口没有打开，请重试"
+        req.updated = time.time()
+    return req.public()
+
+
+@app.post("/api/desktop/login/cookies")
+async def api_desktop_login_cookies(payload: DesktopLoginCookies) -> dict[str, Any]:
+    """桌面壳从官方登录页读到 cookie 后回传，这里校验并落盘。"""
+    _require_desktop()
+    req = state.desktop_login
+    if req is None or req.id != payload.request_id:
+        raise HTTPException(409, "登录请求已失效，请重新发起")
+    if req.status in {"success", "cancelled", "expired"}:
+        return req.public()
+
+    bili = state.bili
+    assert bili is not None
+    try:
+        user = await bili.login_from_cookies(payload.cookies)
+    except NotLoggedIn as exc:
+        message = f"登录态校验失败：{exc.message}，请重试"
+    except BiliError as exc:
+        message = f"登录态校验失败：{exc.message or exc.code}"
+    except httpx.HTTPError as exc:
+        message = f"登录态校验失败：网络错误（{exc}）"
+    except ValueError as exc:
+        # nav 有时会返回风控 HTML 而不是 JSON
+        message = f"登录态校验失败：B 站返回了无法解析的响应（{exc}）"
+    else:
+        try:
+            auth.save(bili.session)
+            message = "登录成功"
+        except OSError as exc:
+            # 本次会话已经可用，只是重启后要重新登录；不要因此把用户卡在失败页
+            message = f"登录成功，但登录态保存失败：{exc}"
+        # 旧账号的音轨缓存不能带进新会话
+        state.tracks.clear()
+        state.by_bvid.clear()
+        req.status = "success"
+        req.message = message
+        req.user = user
+        req.updated = time.time()
+        return req.public()
+
+    req.status = "failed"
+    req.message = message
+    req.user = None
+    req.updated = time.time()
+    return req.public()
+
+
+@app.post("/api/desktop/login/cancel")
+async def api_desktop_login_cancel(payload: DesktopLoginCancel) -> dict[str, Any]:
+    """用户关掉登录窗口 / 关掉登录弹窗时取消这次请求。"""
+    _require_desktop()
+    req = state.desktop_login
+    if req is not None and req.id == payload.request_id:
+        # 已经成功的不再覆盖，避免"登录成功但窗口刚好被关"的竞态
+        if req.status in {"pending", "claimed"}:
+            req.status = "cancelled"
+            req.message = payload.message or "已取消登录"
+            req.updated = time.time()
+        return req.public()
+    return {
+        "request_id": payload.request_id,
+        "mode": "",
+        "status": "expired",
+        "message": "登录请求已失效",
+        "user": None,
+    }
+
+
 @app.post("/api/logout")
 async def api_logout() -> dict[str, Any]:
     bili = state.bili
@@ -226,6 +404,13 @@ async def api_logout() -> dict[str, Any]:
     bili.http.cookies.clear()
     state.tracks.clear()
     state.by_bvid.clear()
+    if state.desktop_login is not None and state.desktop_login.status in {
+        "pending",
+        "claimed",
+    }:
+        state.desktop_login.status = "cancelled"
+        state.desktop_login.message = "已退出登录"
+        state.desktop_login.updated = time.time()
     return {"ok": True}
 
 

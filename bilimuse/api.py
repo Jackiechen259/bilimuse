@@ -167,6 +167,66 @@ class BiliClient:
         await self.refresh_profile()
         return {"status": "success", "message": "登录成功", "cookies": cookies}
 
+    async def login_from_cookies(self, cookies: dict[str, str]) -> dict[str, Any]:
+        """用桌面壳官方登录窗口拿到的 cookie 完成登录。
+
+        B 站账号密码 / 短信验证码登录都必须先过极验，自己实现验证码 SDK 既脆弱
+        又容易踩风控。所以桌面壳内嵌 B 站官方登录页，成功后只把 .bilibili.com
+        的 cookie 交到这里：先临时替换登录态，用 nav 校验；失败则恢复原状态，
+        密码始终不进入本程序。
+        """
+        cleaned: dict[str, str] = {}
+        for raw_name, raw_value in cookies.items():
+            name = str(raw_name).strip()
+            value = str(raw_value).strip()
+            if not name or not value or len(name) > 64 or len(value) > 8192:
+                continue
+            cleaned[name] = value
+        if not cleaned.get("SESSDATA"):
+            raise BiliError(-1, "登录窗口没有返回 SESSDATA")
+
+        previous = (
+            dict(self.session.cookies),
+            self.session.mid,
+            self.session.uname,
+            self.session.face,
+            self.session.vip,
+        )
+        try:
+            mid = int(cleaned.get("DedeUserID", 0) or 0)
+        except ValueError:
+            mid = 0
+        self.session.cookies = cleaned
+        self.session.mid = mid
+        self.http.cookies.clear()
+        self.http.cookies.update(cleaned)
+
+        try:
+            user = await self.refresh_profile()
+        except Exception:
+            (
+                self.session.cookies,
+                self.session.mid,
+                self.session.uname,
+                self.session.face,
+                self.session.vip,
+            ) = previous
+            self.http.cookies.clear()
+            self.http.cookies.update(previous[0])
+            raise
+
+        # nav 可能补了 buvid3 之类的 cookie，一并收进登录态
+        merged = dict(cleaned)
+        for cookie in self.http.cookies.jar:
+            name = cookie.name or ""
+            value = cookie.value or ""
+            if not name or not value or len(value) > 8192:
+                continue
+            if "bilibili" in (cookie.domain or ""):
+                merged[name] = value
+        self.session.cookies = merged
+        return user
+
     async def refresh_profile(self) -> dict[str, Any]:
         data = await self._get(f"{API}/x/web-interface/nav")
         if not data.get("isLogin"):

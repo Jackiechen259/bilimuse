@@ -123,13 +123,35 @@
   <div class="modal hidden" id="login-modal">
     <div class="modal-card">
       <button class="close" id="close-modal">✕</button>
-      <h3>扫码登录</h3>
-      <p class="muted">用 B 站手机客户端扫码，登录态只保存在本机 <code>~/.config/bilimuse/</code></p>
-      <div class="qr-wrap">
-        <img id="qr-img" alt="登录二维码" />
-        <div class="qr-mask hidden" id="qr-mask"><span id="qr-mask-text">刷新</span></div>
+      <h3 id="login-title">扫码登录</h3>
+      <p class="muted" id="login-sub">用 B 站手机客户端扫码，登录态只保存在本机 <code>~/.config/bilimuse/</code></p>
+
+      <div class="login-tabs hidden" id="login-tabs">
+        <button class="login-tab active" data-mode="qr">扫码</button>
+        <button class="login-tab" data-mode="password">账号密码</button>
+        <button class="login-tab" data-mode="sms">短信验证码</button>
       </div>
-      <p class="status" id="qr-status">正在生成二维码…</p>
+
+      <div id="login-qr-panel">
+        <div class="qr-wrap">
+          <img id="qr-img" alt="登录二维码" />
+          <div class="qr-mask hidden" id="qr-mask"><span id="qr-mask-text">刷新</span></div>
+        </div>
+        <p class="status" id="qr-status">正在生成二维码…</p>
+      </div>
+
+      <div class="login-window-panel hidden" id="login-window-panel">
+        <div class="login-window-icon">🔐</div>
+        <p id="login-window-status">正在打开 B 站官方登录窗口…</p>
+        <p class="login-window-hint muted small">
+          账号密码、短信验证码和人机验证都在 B 站官方页面里完成；
+          本应用只读取登录 cookie，不会保存密码。
+        </p>
+        <div class="login-window-actions">
+          <button class="ghost hidden" id="login-window-retry">重试</button>
+          <button class="ghost" id="login-window-cancel">取消</button>
+        </div>
+      </div>
     </div>
   </div>
 
