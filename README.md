@@ -21,6 +21,7 @@ BiliMuse 把这两件事一起解决：扫码登录后直接列出你的收藏�
 - **演示模式**：不登录也能跑通整条链路 —— 本地合成三段音频，每条连接限速 320 KB/s，直观对比开关 BTR 的差别
 - **桌面版**：Tauri v2 原生窗口 + 打包好的 Python 引擎（边车），不用开浏览器，关窗即退出；支持扫码、账号密码和短信验证码三种登录
 - **安卓版**：Kotlin + Compose + Media3 原生 App，BTR 引擎直接作为 ExoPlayer 的 DataSource，支持后台播放、通知栏/锁屏控制和演示模式
+- **安卓版自动更新**：启动时静默检查 GitHub Releases，设置页也可手动检查；应用内下载 APK、校验摘要与签名后交给系统安装器（见 [docs/ANDROID.md](docs/ANDROID.md#自动更新github-releases)）
 - **多种登录方式（安卓 / 桌面）**：原生扫码，或账号密码 / 手机验证码登录（在内嵌的 B 站官方登录页完成极验人机验证，只接收登录 cookie，不保存密码）
 - **零构建**：网页版是 FastAPI + 原生 HTML/CSS/JS，没有 npm、没有打包步骤
 
@@ -107,10 +108,17 @@ sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
 cd android
 ./gradlew :app:assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# R8 release 包（未配置正式签名时回退到仓库内 debug key，可直接安装）
+./gradlew :app:assembleRelease
 ```
 
 产物在 `android/app/build/outputs/apk/debug/app-debug.apk`（约 14 MB，minSdk 26，
 targetSdk 35）。架构、移植细节、测试与已知限制见 [docs/ANDROID.md](docs/ANDROID.md)。
+
+安卓版内置 GitHub Releases 自动更新：启动时静默检查（可关），设置页里也能手动检查；
+下载后校验 APK 的包名、版本与签名，再调起系统安装器。发布流程、versionCode 规则和
+签名密钥配置见 [docs/ANDROID.md](docs/ANDROID.md#自动更新github-releases)。
 
 
 ## BTR 是怎么工作的
@@ -197,10 +205,10 @@ bilimuse/
 ├── android/            # 安卓版：Kotlin + Compose + Media3
 │   ├── app/src/main/kotlin/com/bilimuse/app/
 │   │   ├── btr/        # BTR 引擎 Kotlin 移植
-│   │   ├── data/       # WBI 签名、B 站 API、登录态、演示 CDN
+│   │   ├── data/       # WBI 签名、B 站 API、登录态、演示 CDN、自动更新
 │   │   ├── player/     # MediaSessionService / MediaController / DataSource
 │   │   └── ui/         # Compose 界面
-│   └── app/src/test/   # 15 个 JVM 测试
+│   └── app/src/test/   # 28 个 JVM 测试
 ├── scripts/            # 基准脚本 + 边车打包 / 图标生成
 ├── tests/              # 测试：引擎正确性、限速场景提速、断流恢复、Range、启动器
 └── docs/               # ARCHITECTURE.md / DESKTOP.md / ANDROID.md
@@ -238,7 +246,7 @@ bilimuse/
 cd desktop/src-tauri && cargo test --release login
 ```
 
-安卓版的引擎、WBI 签名、演示 CDN 和音轨选择另有 15 个纯 JVM 测试（不需要模拟器）：
+安卓版的引擎、WBI 签名、演示 CDN、音轨选择和自动更新另有 28 个纯 JVM 测试（不需要模拟器）：
 
 ```bash
 cd android && ./gradlew :app:testDebugUnitTest

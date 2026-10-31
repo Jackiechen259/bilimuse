@@ -14,6 +14,9 @@ import com.bilimuse.app.data.QrPollResult
 import com.bilimuse.app.data.StreamRegistry
 import com.bilimuse.app.data.TrackItem
 import com.bilimuse.app.data.UserInfo
+import com.bilimuse.app.data.update.UpdateCheckResult
+import com.bilimuse.app.data.update.UpdateStatus
+import com.bilimuse.app.data.update.UpdateUiState
 import com.bilimuse.app.player.PlayerController
 import com.bilimuse.app.player.PlayerUiState
 import kotlinx.coroutines.CancellationException
@@ -54,6 +57,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val registry: StreamRegistry = container.registry
     private val settingsStore = container.settingsStore
     private val demoCdn = container.demoCdn
+    private val updater = container.updater
 
     private val player = PlayerController(app, registry, viewModelScope)
     val playerState: StateFlow<PlayerUiState> = player.state
@@ -68,15 +72,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _needLogin = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val needLogin: SharedFlow<Unit> = _needLogin.asSharedFlow()
 
+    private val _update = MutableStateFlow(UpdateUiState())
+    val update: StateFlow<UpdateUiState> = _update.asStateFlow()
+    val autoCheckUpdates: StateFlow<Boolean> = updater.autoCheckEnabled
+
     private var tracksJob: Job? = null
     private var searchJob: Job? = null
     private var playJob: Job? = null
+    private var updateCheckJob: Job? = null
+    private var updateDownloadJob: Job? = null
+    private var updateCheckedThisSession = false
 
     init {
         viewModelScope.launch {
             player.errors.collect { _messages.tryEmit(it) }
         }
         refreshState()
+        viewModelScope.launch {
+            // 让收藏夹先出首屏，再在后台静默问一次 GitHub。
+            delay(2_500)
+            autoCheckForUpdates()
+        }
     }
 
     // ------------------------------------------------------------------ 启动 / 登录
@@ -446,6 +462,144 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setPreferLossless(enabled: Boolean) {
         settingsStore.setPreferLossless(enabled)
+    }
+
+    // ------------------------------------------------------------------ 自动更新
+
+    /** 手动检查：设置页入口。 */
+    fun checkForUpdates() {
+        if (updateCheckJob?.isActive == true || updateDownloadJob?.isActive == true) return
+        updateCheckedThisSession = true
+        updateCheckJob = viewModelScope.launch {
+            _update.update { it.copy(status = UpdateStatus.CHECKING, error = null) }
+            try {
+                when (val result = updater.check()) {
+                    is UpdateCheckResult.Available -> {
+                        _update.value = UpdateUiState(
+                            status = UpdateStatus.AVAILABLE,
+                            update = result.update,
+                            totalBytes = result.update.asset.size,
+                        )
+                        _messages.tryEmit("发现新版本 v${result.update.version}")
+                    }
+                    UpdateCheckResult.UpToDate -> {
+                        _update.value = UpdateUiState(status = UpdateStatus.UP_TO_DATE)
+                        _messages.tryEmit("已是最新版本 v${BuildConfig.VERSION_NAME}")
+                    }
+                    UpdateCheckResult.NoRelease -> {
+                        _update.value = UpdateUiState(status = UpdateStatus.NO_RELEASE)
+                        _messages.tryEmit("GitHub 上还没有已发布的版本")
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _update.update {
+                    it.copy(status = UpdateStatus.FAILED, error = e.message ?: "检查更新失败")
+                }
+                _messages.tryEmit(e.message ?: "检查更新失败")
+            }
+        }
+    }
+
+    /** 下载并校验 APK。下载完成后状态变为 READY，由界面调起系统安装器。 */
+    fun downloadUpdate() {
+        val update = _update.value.update ?: return
+        if (updateDownloadJob?.isActive == true) return
+        updateCheckJob?.cancel()
+        updateDownloadJob = viewModelScope.launch {
+            val self = coroutineContext[Job]
+            _update.update {
+                it.copy(
+                    status = UpdateStatus.DOWNLOADING,
+                    downloadedBytes = 0L,
+                    totalBytes = update.asset.size,
+                    apkFile = null,
+                    error = null,
+                )
+            }
+            try {
+                val file = updater.download(update) { downloaded, total ->
+                    if (_update.value.status == UpdateStatus.DOWNLOADING) {
+                        _update.update {
+                            it.copy(downloadedBytes = downloaded, totalBytes = total)
+                        }
+                    }
+                }
+                val problem = withContext(Dispatchers.IO) { updater.validateApk(file, update) }
+                if (problem != null) {
+                    file.delete()
+                    throw IllegalStateException(problem)
+                }
+                _update.update {
+                    it.copy(
+                        status = UpdateStatus.READY,
+                        downloadedBytes = file.length(),
+                        totalBytes = file.length(),
+                        apkFile = file,
+                        error = null,
+                    )
+                }
+                _messages.tryEmit("更新包已下载并通过校验，点击安装")
+            } catch (e: CancellationException) {
+                // 只有当前这一轮下载被取消时才回退状态；快速重试时旧任务的收尾不能覆盖新状态。
+                if (updateDownloadJob === self) {
+                    _update.update {
+                        it.copy(
+                            status = UpdateStatus.AVAILABLE,
+                            downloadedBytes = 0L,
+                            totalBytes = update.asset.size,
+                            apkFile = null,
+                            error = null,
+                        )
+                    }
+                }
+                throw e
+            } catch (e: Exception) {
+                if (updateDownloadJob === self) {
+                    _update.update {
+                        it.copy(
+                            status = UpdateStatus.FAILED,
+                            apkFile = null,
+                            error = e.message ?: "下载更新失败",
+                        )
+                    }
+                    _messages.tryEmit(e.message ?: "下载更新失败")
+                }
+            }
+        }
+    }
+
+    fun cancelUpdateDownload() {
+        // 保留 job 引用，让协程自己的取消处理能把状态回退到 AVAILABLE；
+        // 新的下载会覆盖这个引用，旧任务的收尾不会覆盖新状态。
+        updateDownloadJob?.cancel()
+    }
+
+    fun setAutoCheckUpdates(enabled: Boolean) {
+        updater.setAutoCheckEnabled(enabled)
+    }
+
+    private suspend fun autoCheckForUpdates() {
+        if (updateCheckedThisSession || !updater.shouldAutoCheck()) return
+        updateCheckedThisSession = true
+        try {
+            when (val result = updater.check()) {
+                is UpdateCheckResult.Available -> {
+                    _update.value = UpdateUiState(
+                        status = UpdateStatus.AVAILABLE,
+                        update = result.update,
+                        totalBytes = result.update.asset.size,
+                    )
+                    _messages.tryEmit("发现新版本 v${result.update.version}，可在设置中更新")
+                }
+                UpdateCheckResult.NoRelease, UpdateCheckResult.UpToDate -> Unit
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // 启动时的自动检查失败不打扰用户；设置页仍可手动重试。
+        }
     }
 
     override fun onCleared() {

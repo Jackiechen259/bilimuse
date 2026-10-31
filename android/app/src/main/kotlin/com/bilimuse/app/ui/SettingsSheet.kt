@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -48,6 +49,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.bilimuse.app.data.EngineSettings
 import com.bilimuse.app.data.UserInfo
+import com.bilimuse.app.data.update.UpdateStatus
+import com.bilimuse.app.data.update.UpdateUiState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,6 +59,8 @@ fun SettingsSheet(
     demo: Boolean,
     settings: EngineSettings,
     version: String,
+    update: UpdateUiState,
+    autoCheckUpdates: Boolean,
     onDismiss: () -> Unit,
     onLogin: () -> Unit,
     onLogout: () -> Unit,
@@ -65,6 +70,9 @@ fun SettingsSheet(
     onConcurrency: (Int) -> Unit,
     onChunkSize: (Int) -> Unit,
     onLossless: (Boolean) -> Unit,
+    onAutoCheckUpdates: (Boolean) -> Unit,
+    onCheckUpdate: () -> Unit,
+    onOpenUpdate: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -195,11 +203,56 @@ fun SettingsSheet(
 
             Spacer(Modifier.height(22.dp))
             SectionTitle("关于")
-            Text(
-                text = "BiliMuse Android $version",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "BiliMuse Android $version",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = updateStatusText(update),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = updateStatusColor(update),
+                    )
+                }
+                Spacer(Modifier.size(10.dp))
+                OutlinedButton(
+                    onClick = if (update.hasOpenableUpdate) onOpenUpdate else onCheckUpdate,
+                    enabled = update.status != UpdateStatus.CHECKING,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        if (update.status == UpdateStatus.AVAILABLE || update.status == UpdateStatus.READY) {
+                            BiliPink.copy(alpha = 0.55f)
+                        } else {
+                            BiliLine
+                        },
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        text = updateActionLabel(update),
+                        color = if (update.status == UpdateStatus.AVAILABLE || update.status == UpdateStatus.READY) {
+                            BiliPink
+                        } else {
+                            BiliText
+                        },
+                        fontSize = 12.sp,
+                    )
+                }
+            }
             Spacer(Modifier.height(4.dp))
+            SettingSwitch(
+                title = "自动检查更新",
+                description = "启动时查询 GitHub Releases，每 6 小时最多一次",
+                checked = autoCheckUpdates,
+                onCheckedChange = onAutoCheckUpdates,
+            )
+            Spacer(Modifier.height(6.dp))
             Text(
                 text = "把 B 站收藏夹变成私人音乐库，内置 BTR 多线程 / 多 CDN 流式加速。" +
                     "引擎、登录态与播放缓存都只在本机。",
@@ -392,4 +445,34 @@ private fun BottomSheetDragHandle() {
             .clip(RoundedCornerShape(2.dp))
             .background(BiliLine),
     )
+}
+
+private fun updateStatusText(update: UpdateUiState): String = when (update.status) {
+    UpdateStatus.IDLE -> "可从 GitHub Releases 获取新版本"
+    UpdateStatus.CHECKING -> "正在检查更新…"
+    UpdateStatus.NO_RELEASE -> "GitHub 上还没有发布版本"
+    UpdateStatus.UP_TO_DATE -> "已是最新版本"
+    UpdateStatus.AVAILABLE -> "发现新版本 v${update.update?.version.orEmpty()}"
+    UpdateStatus.DOWNLOADING -> "正在下载 ${(update.progress * 100).toInt()}%"
+    UpdateStatus.READY -> "更新包已下载，可以安装"
+    UpdateStatus.FAILED -> update.error ?: "更新失败"
+}
+
+private fun updateActionLabel(update: UpdateUiState): String = when (update.status) {
+    UpdateStatus.IDLE -> "检查更新"
+    UpdateStatus.CHECKING -> "检查中"
+    UpdateStatus.NO_RELEASE, UpdateStatus.UP_TO_DATE -> "重新检查"
+    UpdateStatus.AVAILABLE -> "查看更新"
+    UpdateStatus.DOWNLOADING -> "查看进度"
+    UpdateStatus.READY -> "安装更新"
+    UpdateStatus.FAILED -> if (update.update != null) "查看" else "重试"
+}
+
+private fun updateStatusColor(update: UpdateUiState): Color = when (update.status) {
+    UpdateStatus.AVAILABLE,
+    UpdateStatus.DOWNLOADING,
+    UpdateStatus.READY,
+    -> BiliPink
+    UpdateStatus.FAILED -> BiliDanger
+    else -> BiliMuted
 }

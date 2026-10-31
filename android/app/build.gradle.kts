@@ -5,6 +5,29 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+// 版本号默认给本地调试构建用；发布构建由 CI 按 git tag 通过 -P 覆盖，例如：
+// ./gradlew :app:assembleRelease -PbilimuseVersionName=0.2.0 -PbilimuseVersionCode=200
+val appVersionName = providers.gradleProperty("bilimuseVersionName").getOrElse("0.1.0")
+val appVersionCodeRaw = providers.gradleProperty("bilimuseVersionCode").getOrElse("1")
+val appVersionCode = appVersionCodeRaw.toIntOrNull()
+    ?: error("bilimuseVersionCode 必须是整数（当前：$appVersionCodeRaw）")
+val updateRepo = providers.gradleProperty("bilimuseUpdateRepo")
+    .getOrElse("Jackiechen259/bilimuse")
+
+// 正式发布签名通过环境变量注入（CI 从 Secrets 解码出临时 keystore）。
+// 未配置时回退到仓库内的公开调试密钥，保证 sideload 和自动更新链路开箱可用；
+// 但公开密钥意味着任何人都能伪造同包名 APK，正式分发请配置这四个环境变量。
+val releaseKeystore = System.getenv("BILIMUSE_ANDROID_KEYSTORE")
+val releaseStorePassword = System.getenv("BILIMUSE_ANDROID_STORE_PASSWORD")
+val releaseKeyAlias = System.getenv("BILIMUSE_ANDROID_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("BILIMUSE_ANDROID_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    releaseKeystore,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.bilimuse.app"
     compileSdk = 35
@@ -13,8 +36,9 @@ android {
         applicationId = "com.bilimuse.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
+        buildConfigField("String", "UPDATE_REPO", "\"$updateRepo\"")
     }
 
     signingConfigs {
@@ -23,6 +47,14 @@ android {
             storePassword = "android"
             keyAlias = "bilimuse"
             keyPassword = "android"
+        }
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseKeystore!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
@@ -34,6 +66,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // 有正式签名就用正式签名；否则回退到仓库内的调试密钥，产物依然可直接安装。
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
         debug {
             // 直接用项目内自带的调试签名，方便没有 ~/.android/debug.keystore 的环境打包

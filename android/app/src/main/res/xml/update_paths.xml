@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- GitHubUpdater 会把 APK 放在 filesDir/updates 或 getExternalFilesDir(null)/updates -->
+    <files-path name="updates_files" path="updates/" />
+    <external-files-path name="updates_external" path="updates/" />
+</paths>
