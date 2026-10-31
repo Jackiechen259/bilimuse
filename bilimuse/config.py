@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 APP_NAME = "bilimuse"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 def _default_config_dir() -> Path:

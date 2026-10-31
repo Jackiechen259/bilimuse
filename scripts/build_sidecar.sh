@@ -134,7 +134,8 @@ echo "[sidecar] 打包 Python 引擎（${TRIPLE}）"
   --workpath "$BUILD_DIR/work" \
   --specpath "$BUILD_DIR" \
   --paths "$ROOT" \
-  --add-data "$ROOT/bilimuse/web${DATA_SEP}bilimuse/web" \
+  # 用相对路径：Windows Git Bash 会把带分隔符的绝对 POSIX 路径转换坏。
+  --add-data "bilimuse/web${DATA_SEP}bilimuse/web" \
   --collect-submodules uvicorn \
   --hidden-import uvicorn.logging \
   --hidden-import uvicorn.loops.auto \

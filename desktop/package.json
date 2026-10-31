@@ -1,7 +1,7 @@
 {
   "name": "bilimuse-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "BiliMuse 桌面壳（Tauri v2）",
   "scripts": {
     "tauri": "tauri",

@@ -49,6 +49,21 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Verify desktop version
+        shell: bash
+        run: |
+          APP_VERSION="$(node -p "require('./desktop/src-tauri/tauri.conf.json').version")"
+          PKG_VERSION="$(node -p "require('./desktop/package.json').version")"
+          if [[ "${APP_VERSION}" != "${PKG_VERSION}" ]]; then
+            echo "::error::tauri.conf.json (${APP_VERSION}) 与 package.json (${PKG_VERSION}) 版本不一致"
+            exit 1
+          fi
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "v${APP_VERSION}" != "${GITHUB_REF_NAME}" ]]; then
+            echo "::error::tag ${GITHUB_REF_NAME} 与桌面版版本 v${APP_VERSION} 不一致"
+            exit 1
+          fi
+          echo "桌面版版本：v${APP_VERSION}"
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
