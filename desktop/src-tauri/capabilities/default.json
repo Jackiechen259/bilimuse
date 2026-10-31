@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "主窗口的默认能力集（页面本身不用 Tauri IPC，仅保留核心权限）",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

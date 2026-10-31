@@ -7,17 +7,50 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 APP_NAME = "bilimuse"
 VERSION = "0.1.0"
 
-CONFIG_DIR = Path(os.environ.get("BILIMUSE_CONFIG_DIR", Path.home() / ".config" / APP_NAME))
-SESSION_FILE = CONFIG_DIR / "session.json"
-CACHE_DIR = Path(os.environ.get("BILIMUSE_CACHE_DIR", Path.home() / ".cache" / APP_NAME))
 
-WEB_DIR = Path(__file__).resolve().parent / "web"
+def _default_config_dir() -> Path:
+    """各平台的配置目录；桌面版打包后也能落在系统习惯的位置。"""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+        return base / APP_NAME
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_NAME
+    return Path.home() / ".config" / APP_NAME
+
+
+def _default_cache_dir() -> Path:
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+        return base / APP_NAME / "cache"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / APP_NAME
+    return Path.home() / ".cache" / APP_NAME
+
+
+def _web_dir() -> Path:
+    """前端静态文件位置。
+
+    PyInstaller 打包后 `__file__` 指向解包目录里的 pyc，静态文件被放在
+    `sys._MEIPASS/bilimuse/web`（见 scripts/build_sidecar.sh 的 --add-data）。
+    """
+    bundled = getattr(sys, "_MEIPASS", None)
+    if bundled:
+        return Path(bundled) / "bilimuse" / "web"
+    return Path(__file__).resolve().parent / "web"
+
+
+CONFIG_DIR = Path(os.environ.get("BILIMUSE_CONFIG_DIR") or _default_config_dir())
+SESSION_FILE = CONFIG_DIR / "session.json"
+CACHE_DIR = Path(os.environ.get("BILIMUSE_CACHE_DIR") or _default_cache_dir())
+
+WEB_DIR = _web_dir()
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

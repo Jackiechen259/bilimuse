@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+import sys
 import time
 import uuid
 from collections import OrderedDict
@@ -528,6 +529,14 @@ async def style_css() -> FileResponse:
     return FileResponse(WEB_DIR / "style.css", media_type="text/css")
 
 
+def runtime_info() -> dict[str, str]:
+    """实际生效的事件循环 / HTTP 解析器（装了 uvloop、httptools 就是它们）。"""
+    return {
+        "loop": "uvloop" if "uvloop" in sys.modules else "asyncio",
+        "http": "httptools" if "httptools" in sys.modules else "h11",
+    }
+
+
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     return {
@@ -537,4 +546,5 @@ async def health() -> dict[str, Any]:
         "concurrency": settings.concurrency,
         "tracks": len(state.tracks),
         "demo": state.demo_mode,
+        "runtime": runtime_info(),
     }

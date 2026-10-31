@@ -25,7 +25,7 @@
   │                              │                              │
   │                              │ 探测候选节点（并发 64KB Range）│
   │                              ├─────────────────────────────>│  × N 个 CDN host
-  │                              │ 过滤慢节点 + 自适应并发       │
+  │                              │ 首个可用节点起播，其余后台补  │
   │<─────────────────────────────┤ {stream_id, size, quality}   │
   │                              │                              │
   │ GET /api/stream/{id}         │                              │
@@ -59,7 +59,14 @@
 total, supports_range, ttfb, throughput = await probe(url)   # 64 KB
 ```
 
-只保留 `throughput >= max(best * 0.6, 150 KB/s)` 的节点。
+**不等所有节点测完**。九个候选里常有一两个连得上却不回包，等它们就会白等满 3 秒超时。所以 `build_stream()` 是"抢跑"的：第一个返回且支持 Range 的节点先把流交出去开播，剩下的探针在后台继续跑（`_graft()`），谁测完谁进池。新节点要过 `throughput >= max(best * 0.3, 150 KB/s)` 这关，进来的同时会按新速度收紧对冲延迟。
+
+```python
+stream = await build_stream(...)   # 第一个可用节点就返回
+# 之后 pool 自己会长；/api/stats 里的 nodes 数量会跟着涨
+```
+
+唯一的例外：首个节点慢于 150 KB/s 时再多等最多 0.75 秒（`EAGER_GRACE`），免得一个被限速到 5 KB/s 的坑节点抢到起播权。`eager=False` 保留旧语义（等全部探针），测试和对比脚本用得上。
 
 ### 调度
 
@@ -130,12 +137,30 @@ auto_concurrency = clamp(ceil(4MB/s ÷ 探测吞吐), 2, 用户设定值)
 2. `test_btr_is_much_faster_and_byte_exact` —— 提速 > 2.5x 且 sha256 一致
 3. `test_range_seek` —— 中段 Range 的字节精确
 4. `test_survives_broken_node` —— 一个节点每次都断流，数据仍完整
-5. `test_server.py` —— 起真实端口，跑通 登录态 → 收藏夹 → 解析 → Range 取流 的完整链路
+5. `test_dead_node_does_not_delay_startup` —— 有个只 accept 不回包的"黑洞"节点时，起播不被拖慢
+6. `test_late_node_joins_pool_in_background` —— 慢一拍的节点事后自己进池
+7. `test_eager_off_still_waits_for_all_nodes` —— `eager=False` 保留旧语义
+8. `test_server.py` —— 起真实端口，跑通 登录态 → 收藏夹 → 解析 → Range 取流 的完整链路
 
 不 mock 引擎内部逻辑：测试打的是真 HTTP，测的是端到端行为。
+
+## 安卓版
+
+安卓版没有照搬"本地服务端 + 浏览器 UI"，而是把同一套思路原生化：
+
+- 界面是 Jetpack Compose，不加载网页；
+- ExoPlayer 通过自定义 `BtrDataSource` 直接消费 BTR 引擎的输出，省掉本地 HTTP 转发；
+- `seek` 不再换算 Range，而是关掉旧 reader、按新 position 新建一条顺序 reader；
+- 后台播放由 `MediaSessionService` 负责，通知栏、锁屏、耳机按键走系统媒体会话；
+- 登录：扫码是原生的；账号密码 / 手机验证码因为 B 站强制极验，嵌入官方 H5 登录页完成验证，
+  成功后把 cookie 导入原生会话。
+
+BTR 的节点探测、抢跑、加权调度、对冲、续传、自适应并发都有 Kotlin 移植，并用
+MockWebServer 按连接限速做了字节一致性和提速测试。细节见 [ANDROID.md](ANDROID.md)。
 
 ## 已知取舍
 
 - **按序输出 vs 全速下载**：当前窗口只预取播放位置之后的数据。要"整首缓存"就得放开窗口，但内存与磁盘策略会复杂很多，等有缓存需求再说。
+- **抢跑 vs 最优节点**：第一个能用的节点就开播，意味着它的速度可能不是最高的；靠后台补节点 + 慢块对冲把差距补回来。如果首批节点全都低于 150 KB/s，会多等最多 0.75 秒再决定（`EAGER_GRACE`）。
 - **探测成本**：每条新音轨要额外下载 N×64 KB 做测速。对 3 MB 的音轨是可接受的 2%，对 300 KB 的短音频就偏重 —— 后续可以按文件大小决定是否全省略。
 - **没有 WBI 缓存**：每次 `playurl` 都会重新拉一次 `nav` 取 img/sub key。请求频率低，先不做缓存。

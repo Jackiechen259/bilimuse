@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BiliMuse</title>
+    <style>
+      :root {
+        --bg: #0b0d12;
+        --accent: #7e9cff;
+        --accent-2: #a78bfa;
+        --text: #e7e9f3;
+        --muted: #8b90a6;
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body {
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(680px 420px at 50% 38%, rgba(126, 156, 255, 0.16), transparent 70%),
+          radial-gradient(520px 340px at 72% 70%, rgba(167, 139, 250, 0.10), transparent 72%),
+          var(--bg);
+        color: var(--text);
+        font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        user-select: none;
+        overflow: hidden;
+      }
+
+      .splash {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+        padding: 32px;
+        text-align: center;
+      }
+
+      .mark {
+        width: 96px;
+        height: 96px;
+        filter: drop-shadow(0 14px 36px rgba(126, 156, 255, 0.35));
+        animation: float 4.5s ease-in-out infinite;
+      }
+
+      h1 {
+        margin: 6px 0 0;
+        font-size: 22px;
+        font-weight: 650;
+        letter-spacing: 0.3px;
+      }
+
+      .tagline {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12.5px;
+        letter-spacing: 0.4px;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        margin-top: 10px;
+        padding: 9px 18px;
+        border: 1px solid rgba(126, 156, 255, 0.18);
+        border-radius: 999px;
+        background: rgba(126, 156, 255, 0.06);
+        color: #c3c8dc;
+        font-size: 12.5px;
+        max-width: 560px;
+        transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+      }
+
+      .status.error {
+        color: #ffb4b4;
+        border-color: rgba(255, 120, 120, 0.35);
+        background: rgba(255, 90, 90, 0.08);
+        border-radius: 14px;
+        line-height: 1.7;
+        text-align: left;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 0 rgba(126, 156, 255, 0.6);
+        animation: pulse 1.4s ease-out infinite;
+      }
+
+      .status.error .dot { display: none; }
+
+      .bar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        height: 2px;
+        width: 36%;
+        background: linear-gradient(90deg, transparent, var(--accent), var(--accent-2), transparent);
+        opacity: 0.8;
+        animation: slide 1.6s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(126, 156, 255, 0.55); opacity: 1; }
+        70% { box-shadow: 0 0 0 9px rgba(126, 156, 255, 0); opacity: 0.75; }
+        100% { box-shadow: 0 0 0 0 rgba(126, 156, 255, 0); opacity: 1; }
+      }
+
+      @keyframes float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-6px); }
+      }
+
+      @keyframes slide {
+        0% { transform: translateX(-40%); }
+        100% { transform: translateX(300%); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .mark, .dot, .bar { animation: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar"></div>
+
+    <main class="splash">
+      <svg class="mark" viewBox="0 0 96 96" fill="none" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="93" height="93" rx="22" fill="#121528" stroke="#2a3050" />
+        <circle cx="48" cy="56" r="26" fill="#0e1020" stroke="#252b45" />
+        <circle cx="48" cy="56" r="17" stroke="#242a42" stroke-width="1.5" />
+        <circle cx="48" cy="56" r="7.5" fill="#0a0c16" stroke="#2b3252" />
+        <circle cx="48" cy="56" r="2.4" fill="#7e9cff" />
+        <g>
+          <ellipse cx="38" cy="62" rx="7.2" ry="5.4" transform="rotate(-18 38 62)" fill="#7e9cff" />
+          <ellipse cx="57.5" cy="58.5" rx="7.2" ry="5.4" transform="rotate(-18 57.5 58.5)" fill="#a78bfa" />
+          <rect x="43.4" y="32" width="2.6" height="27" rx="1.3" fill="#7e9cff" />
+          <rect x="62.9" y="29.5" width="2.6" height="26" rx="1.3" fill="#a78bfa" />
+          <path d="M43.4 32h22.1v4.2H43.4z" fill="#a78bfa" opacity="0.9" />
+        </g>
+      </svg>
+
+      <h1>BiliMuse</h1>
+      <p class="tagline">把收藏夹变成歌单 · 本地播放器</p>
+
+      <div class="status" id="status">
+        <span class="dot"></span>
+        <span id="status-text">正在启动本地引擎…</span>
+      </div>
+    </main>
+
+    <script>
+      // Rust 端启动失败时会调用它，把错误直接显示在启动页上
+      window.__bilimuseError = function (message) {
+        var box = document.getElementById('status');
+        var text = document.getElementById('status-text');
+        box.classList.add('error');
+        text.textContent = message;
+      };
+    </script>
+  </body>
+</html>

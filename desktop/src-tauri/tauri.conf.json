@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "BiliMuse",
+  "version": "0.1.0",
+  "identifier": "com.bilimuse.desktop",
+  "build": {
+    "frontendDist": "../web",
+    "beforeDevCommand": "bash ../scripts/build_sidecar.sh --if-needed",
+    "beforeBuildCommand": "bash ../scripts/build_sidecar.sh"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage"],
+    "externalBin": ["binaries/bilimuse-server"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "category": "Music",
+    "shortDescription": "把 B 站收藏夹变成私人音乐库",
+    "longDescription": "BiliMuse 桌面版：扫码登录 B 站，把收藏夹当作歌单播放；内置 BTR 多线程 / 多 CDN 流式加速，播放器界面与网页版一致。",
+    "copyright": "MIT"
+  }
+}

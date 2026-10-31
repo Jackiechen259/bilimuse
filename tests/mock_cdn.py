@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import threading
 import time
 
@@ -11,6 +12,47 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
 
 CHUNK = 16 * 1024
+
+
+class Blackhole:
+    """只 accept、永远不回包的节点：模拟"连得上但卡死"的镜像。"""
+
+    def __init__(self) -> None:
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(64)
+        self.sock.settimeout(0.2)
+        self.port = int(self.sock.getsockname()[1])
+        self._stop = threading.Event()
+        self._held: list[socket.socket] = []
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                conn, _ = self.sock.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                return
+            self._held.append(conn)
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}/media/song.m4a"
+
+    def close(self) -> None:
+        self._stop.set()
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+        for conn in self._held:
+            try:
+                conn.close()
+            except OSError:
+                pass
 
 
 def parse_range(header: str | None, total: int):

@@ -1,6 +1,7 @@
 # BiliMuse · 哔哩缪斯
 
 > 把 B 站收藏夹变成私人音乐库的本地播放器，内置 **BTR 多线程 / 多 CDN 流式加速**。
+> 网页版、桌面版、安卓版三端可用。
 
 ![演示模式界面](assets/demo.png)
 
@@ -14,10 +15,14 @@ BiliMuse 把这两件事一起解决：扫码登录后直接列出你的收藏�
 - **收藏夹即歌单**：列出全部收藏夹、支持夹内搜索、顺序/循环播放、上一首下一首、空格键控制
 - **音质优先**：Hi-Res 无损 → 杜比全景声 → 最高码率（192K/132K/64K），有无损就播无损
 - **BTR 引擎**：多 Range 并发、多 CDN 节点竞速、慢块对冲、断点续传、按实时速度加权调度
+- **起播不等测速**：第一个可用节点先开播，剩下的镜像在后台边测边补进节点池
 - **自适应并发**：节点本来就快时自动少开连接（握手也是成本），单连接被限速时才拉满
 - **实时指标**：并发数、命中节点、块进度、瞬时速度、对冲次数，播放器右下角直接可见
 - **演示模式**：不登录也能跑通整条链路 —— 本地合成三段音频，每条连接限速 320 KB/s，直观对比开关 BTR 的差别
-- **零构建**：FastAPI + 原生 HTML/CSS/JS，没有 npm、没有打包步骤
+- **桌面版**：Tauri v2 原生窗口 + 打包好的 Python 引擎（边车），不用开浏览器，关窗即退出
+- **安卓版**：Kotlin + Compose + Media3 原生 App，BTR 引擎直接作为 ExoPlayer 的 DataSource，支持后台播放、通知栏/锁屏控制和演示模式
+- **多种登录方式（安卓）**：原生扫码，或账号密码 / 手机验证码登录（在 App 内嵌的 B 站官方登录页完成极验人机验证，App 只接收登录 cookie，不保存密码）
+- **零构建**：网页版是 FastAPI + 原生 HTML/CSS/JS，没有 npm、没有打包步骤
 
 ## 快速开始
 
@@ -48,30 +53,76 @@ python -m bilimuse --demo          # 或 python -m bilimuse
 
 | 参数 | 说明 | 默认 |
 | --- | --- | --- |
-| `--host` / `--port` | 监听地址与端口 | `127.0.0.1:8756` |
+| `--host` / `--port` | 监听地址与端口；`--port 0` 表示系统分配 | `127.0.0.1:8756` |
 | `--demo` | 演示模式，播放本地合成音频 | 关 |
 | `--concurrency` | BTR 并发上限 | `8` |
 | `--no-btr` | 关闭多线程，走单连接（用于对比） | 关 |
 | `--open` | 启动后自动打开浏览器 | 关 |
+| `--desktop` | 桌面壳模式：只监听回环、日志静默、就绪后输出 `BILIMUSE_PORT=<port>` | 关 |
 
 也可以直接用环境变量：`BILIMUSE_PORT`、`BILIMUSE_CONCURRENCY`、`BILIMUSE_CHUNK_SIZE`、`BILIMUSE_BTR=0` 等，见 `bilimuse/config.py`。
+
+## 桌面版
+
+不想开浏览器就用桌面版：Tauri 负责窗口，Python 引擎打包成边车随应用启动，
+前端页面与网页版完全一致。
+
+![桌面版界面](assets/desktop.png)
+
+```bash
+cd desktop
+npm install          # 或 pnpm install，只装 Tauri CLI
+npm run dev          # 开发运行（首次会自动打包边车，约 30 秒）
+npm run build        # 出 .deb / .AppImage
+```
+
+Linux 构建需要 webkit2gtk：
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+演示模式：`npm run dev -- -- --demo`（或 `BILIMUSE_DEMO=1 npm run dev`）。
+架构、打包细节、平台差异和故障排查见 [docs/DESKTOP.md](docs/DESKTOP.md)。
+
+## 安卓版
+
+原生 Kotlin 版本：Compose 手机界面 + Media3/ExoPlayer，BTR 引擎直接作为 DataSource 接入，
+不需要在手机上跑 Python 或本地 HTTP 服务。支持后台播放、通知栏/锁屏控制、随机/循环、
+夹内搜索、分页加载，不登录也可以先玩演示模式。登录支持**扫码**、**账号密码**和
+**手机验证码**：后两种需要 B 站极验，App 内嵌 B 站官方登录页完成验证，成功后只把
+登录 cookie 换进原生会话，密码不经过 App 代码。
+
+![安卓版播放界面](assets/android.png)
+
+```bash
+cd android
+./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+产物在 `android/app/build/outputs/apk/debug/app-debug.apk`（约 14 MB，minSdk 26，
+targetSdk 35）。架构、移植细节、测试与已知限制见 [docs/ANDROID.md](docs/ANDROID.md)。
+
 
 ## BTR 是怎么工作的
 
 名字借自 [Bilibili-thread-ripper](https://github.com/MrTangLuyao/Bilibili-thread-ripper)：**把一条大请求拆成很多小段，分散到多条连接、多个节点上并发拿下，再按顺序拼回去**。
 
-浏览器里的 `<audio>` 只能整段拉流、一条连接到底，所以真正的并发放在服务端：前端只连本地 `/api/stream/<id>`，服务端负责把远程音频"多线程"地取回来。
+浏览器里的 `<audio>` 只能整段拉流、一条连接到底，所以真正的并发放在服务端：前端只连本地 `/api/stream/<id>`，服务端负责把远程音频"多线程"地取回来。（安卓版没有本地服务端，同样的并发放在 App 内的 Media3 DataSource 后面。）
 
 一次取流的完整流程：
 
 1. **取流**：`playurl` 拿到 dash 音频流。挑选顺序是 Hi-Res 无损 → 杜比 → 最高码率。
 2. **探测节点**：同一段音频的 path/query 在多个 CDN host 上是通用的，把备份地址 + 已知镜像 host 拼成候选列表，每个节点实测 64 KB，拿到**真实吞吐**和 TTFB。只换 host 的镜像里有大量"响应很快但被限速到 5 KB/s"的坑，不实测就会被它拖死。
-3. **过滤慢节点**：低于最快节点 60% 的直接踢出节点池 —— 按序输出时，一个慢块就能卡住整条流水线。
-4. **分块**：块大小按文件长度折中（128 KB ~ 512 KB）。块越小起播越快，但请求开销也越大。
-5. **加权调度**：按实测速度的平方加权选节点，快的多拿块，同时保留少量探索，防止"先给速度、后限速"的节点被永久选中。
-6. **对冲**：某块超过预期耗时 2 倍还没回来，就换一个节点重发同一段，谁先到用谁，另一个取消 —— 只在这块可能赶不上播放时才浪费这份带宽。
-7. **续传**：连接中途断掉时，记下已收到的字节数，从断点续 Range，不整块重来。
-8. **自适应并发**：目标吞吐 4 MB/s。节点本身很快就没必要开 8 条连接（握手要几百毫秒，反而更慢）；一旦出现慢块或断流，并发自动往上加，直到用户设定的上限。
+3. **不等全部测完**：第一个真正能用的节点先把流交出去开播，剩下的探针在后台继续测，谁测完谁进节点池 —— 九个候选里常有一两个连得上却不回包，等它们就是白等 3 秒超时（实测：3.1s → 0.2s）。
+4. **过滤慢节点**：低于最快节点 60% 的直接踢出节点池 —— 按序输出时，一个慢块就能卡住整条流水线。
+5. **分块**：块大小按文件长度折中（128 KB ~ 512 KB）。块越小起播越快，但请求开销也越大。
+6. **加权调度**：按实测速度的平方加权选节点，快的多拿块，同时保留少量探索，防止"先给速度、后限速"的节点被永久选中。
+7. **对冲**：某块超过预期耗时 2 倍还没回来，就换一个节点重发同一段，谁先到用谁，另一个取消 —— 只在这块可能赶不上播放时才浪费这份带宽。
+8. **续传**：连接中途断掉时，记下已收到的字节数，从断点续 Range，不整块重来。
+9. **自适应并发**：目标吞吐 4 MB/s。节点本身很快就没必要开 8 条连接（握手要几百毫秒，反而更慢）；一旦出现慢块或断流，并发自动往上加，直到用户设定的上限。
 
 对外仍然是一个普通的 Range 流：支持 `206 Partial Content`，所以进度条拖动、切歌、浏览器自己的预读都正常。
 
@@ -89,6 +140,17 @@ BTR   : 1.25s (3.19 MB/s)，并发 8，块 256 KB
 PYTHONPATH=. .venv/bin/python scripts/bench_mock.py
 ```
 
+起播延迟（9 个候选里 8 个"连得上但不回包"）：
+
+```
+等全部测完: 3119 ms
+抢跑      :  199 ms
+```
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/bench_probe.py
+```
+
 真实 B 站视频抽样（2 MB 区间，同一音轨）：
 
 | 视频 | 单连接 | BTR | 倍数 |
@@ -100,6 +162,14 @@ PYTHONPATH=. .venv/bin/python scripts/bench_mock.py
 
 最后一行是诚实的一部分：**当单条连接本身就能跑满（十几 MB/s）时，BTR 反而慢几十到几百毫秒** —— 多开连接要握手、要探测。所以并发是自适应的，而不是固定拉满；真正需要它的场景是"单连接只有几百 KB/s、换个节点就快"的跨境线路。
 
+### 运行时
+
+网页版默认装 `uvloop`（事件循环）和 `httptools`（HTTP 解析）：本地代理一条音轨要发十几次 Range 请求，C 实现比纯 Python 省 10~15% CPU。桌面包**不**打包 uvloop —— 那个 `.so` 会让边车多 5 MB、启动慢 ~100 ms，而换来的那点 CPU 在单条本地流上可以忽略。`/api/health` 会报当前实际用的组合：
+
+```json
+{"ok": true, "runtime": {"loop": "uvloop", "http": "httptools"}}
+```
+
 ## 项目结构
 
 ```
@@ -109,13 +179,24 @@ bilimuse/
 │   ├── auth.py         # 登录态本地存储（0600）
 │   ├── btr.py          # BTR 引擎：节点探测、分块调度、对冲、续传
 │   ├── server.py       # FastAPI：登录 / 收藏夹 / 取流 / Range / 统计
+│   ├── launcher.py     # 端口绑定 + uvicorn 启动（支持 --port 0 与桌面模式）
 │   ├── demo.py         # 演示音频合成（4 秒循环拼接，秒级生成）
-│   ├── config.py       # 配置与路径
+│   ├── config.py       # 配置与路径（含 PyInstaller 冻结路径）
 │   ├── web/            # 前端：index.html / app.js / style.css
 │   └── __main__.py     # 命令行入口
-├── tests/              # 12 个测试：引擎正确性、限速场景提速、断流恢复、Range
-├── scripts/            # 可复现的基准脚本（假 CDN / 真实视频）
-└── docs/ARCHITECTURE.md
+├── desktop/            # Tauri v2 桌面壳（Rust + 启动页）
+│   ├── web/index.html  # 启动页
+│   └── src-tauri/      # 窗口、边车生命周期、打包配置、图标
+├── android/            # 安卓版：Kotlin + Compose + Media3
+│   ├── app/src/main/kotlin/com/bilimuse/app/
+│   │   ├── btr/        # BTR 引擎 Kotlin 移植
+│   │   ├── data/       # WBI 签名、B 站 API、登录态、演示 CDN
+│   │   ├── player/     # MediaSessionService / MediaController / DataSource
+│   │   └── ui/         # Compose 界面
+│   └── app/src/test/   # 15 个 JVM 测试
+├── scripts/            # 基准脚本 + 边车打包 / 图标生成
+├── tests/              # 测试：引擎正确性、限速场景提速、断流恢复、Range、启动器
+└── docs/               # ARCHITECTURE.md / DESKTOP.md / ANDROID.md
 ```
 
 ## API
@@ -136,10 +217,16 @@ bilimuse/
 ## 测试
 
 ```bash
-.venv/bin/python -m pytest -q      # 12 passed
+.venv/bin/python -m pytest -q      # 23 passed
 ```
 
-测试用一台"每条连接限速 500 KB/s"的假 CDN 验证三件事：字节完全一致（sha256）、并发确实更快（>2.5x）、一个节点反复断流时依然能靠另一个节点拼出完整数据。
+安卓版的引擎、WBI 签名、演示 CDN 和音轨选择另有 15 个纯 JVM 测试（不需要模拟器）：
+
+```bash
+cd android && ./gradlew :app:testDebugUnitTest
+```
+
+测试用一台"每条连接限速 500 KB/s"的假 CDN 验证：字节完全一致（sha256）、并发确实更快（>2.5x）、一个节点反复断流时依然能靠另一个节点拼出完整数据，以及"连得上但不回包"的节点不会拖慢起播。
 
 ## 已知限制
 
@@ -151,14 +238,16 @@ bilimuse/
 
 ## Roadmap
 
-- [ ] 播放队列持久化 + 自定义歌单
+- [ ] 播放队列持久化 + 自定义歌单（三端共享设计）
 - [ ] 收藏夹增量同步（只看新增的稿件）
 - [ ] 本地缓存已听过的音轨，二次播放零等待
-- [ ] 桌面壳（Tauri / pywebview），脱离浏览器
-- [ ] 全局快捷键与系统媒体控制（已接 Media Session，桌面壳再接一层）
+- [x] 桌面壳（Tauri v2 + Python 边车，见 `desktop/`）
+- [x] 安卓版（Kotlin + Compose + Media3，见 `android/`）
+- [ ] 桌面端单实例 / 托盘 / 全局快捷键（已接 Media Session，桌面壳再接一层）
+- [ ] 网页 / 桌面端的账号密码、短信登录（需要官方登录窗口 + cookie 交换，安卓版已支持）
 
 ## 声明
 
-仅供个人学习与技术研究。音频来自 B 站公开接口，仅用于本人账号收藏内容的在线收听，不提供下载、转存或再分发功能；请遵守 B 站用户协议与当地法律法规。BTR 的名字与思路来自 [Bilibili-thread-ripper](https://github.com/MrTangLuyao/Bilibili-thread-ripper)，本项目是完全独立的 Python 实现。
+仅供个人学习与技术研究。音频来自 B 站公开接口，仅用于本人账号收藏内容的在线收听，不提供下载、转存或再分发功能；请遵守 B 站用户协议与当地法律法规。BTR 的名字与思路来自 [Bilibili-thread-ripper](https://github.com/MrTangLuyao/Bilibili-thread-ripper)，本项目是独立的 Python / Kotlin 实现。
 
 MIT License.

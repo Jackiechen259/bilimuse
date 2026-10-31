@@ -44,6 +44,10 @@ class StreamError(RuntimeError):
     pass
 
 
+# probe() 的返回值：(总长度, 是否支持 Range, 首字节延迟, 实测吞吐)
+ProbeResult = tuple[int, bool, float, float]
+
+
 def expand_mirrors(url: str, backups: Iterable[str] = ()) -> list[str]:
     """从一条 playurl 拼出候选节点列表（备份地址 + 已知镜像 host 互换）。"""
     parsed = urllib.parse.urlsplit(url)
@@ -137,6 +141,13 @@ class CdnPool:
         src.errors += 1
         src.speed *= 0.5
 
+    def add(self, src: Source) -> bool:
+        """后台新测出的节点入池（同一个 URL 只收一次）。"""
+        if any(s.url == src.url for s in self.sources):
+            return False
+        self.sources.append(src)
+        return True
+
 
 @dataclass
 class Stats:
@@ -197,6 +208,7 @@ class BTRStream:
         self.hedge_delay = hedge_delay
         self.max_rounds = max_rounds
         self.stats = Stats()
+        self._graft_task: asyncio.Task[None] | None = None
 
     # ------------------------------------------------------------ 单请求
 
@@ -287,6 +299,31 @@ class BTRStream:
             for task in tasks:
                 task.cancel()
         raise StreamError(f"区间 {offset}+{length} 所有节点都失败")
+
+    # ------------------------------------------------------------ 后台补节点
+
+    def add_source(self, src: Source) -> bool:
+        """后台测速完成后把新节点塞进池子；太慢的直接丢掉。
+
+        起播时只等到了一个节点，后面的探针还在跑。测完一个收一个，
+        块的调度马上就会按新测出来的速度重新分配。
+        """
+        floor = max(SLOW_NODE_FLOOR, self.pool.best_speed() * 0.3)
+        if src.speed < floor:
+            return False
+        if not self.pool.add(src):
+            return False
+        best = max(self.pool.best_speed(), src.speed)
+        # 节点变快 => 单块的理论耗时变短 => 对冲不必那么早
+        expected = self.chunk_size / max(best, 1.0)
+        self.hedge_delay = min(2.5, max(0.8, expected * 2.0))
+        return True
+
+    def start_grafting(
+        self, probes: dict[asyncio.Task[ProbeResult], str],
+        pending: set[asyncio.Task[ProbeResult]],
+    ) -> None:
+        self._graft_task = asyncio.create_task(_graft(self, probes, pending))
 
     async def _chunk(self, offset: int, length: int) -> bytes:
         data = bytearray()
@@ -434,6 +471,11 @@ class SimpleStream:
 
 
 PROBE_BYTES = 64 * 1024
+PROBE_TIMEOUT = 3.0
+# 节点低于这个速度就不配进节点池：按序输出时一个慢块就能卡住整条流水线
+SLOW_NODE_FLOOR = 150 * 1024
+# 第一个能用的节点如果太慢，最多再等这么久看有没有更快的（通常用不到）
+EAGER_GRACE = 0.75
 
 
 async def probe(client: httpx.AsyncClient, url: str, headers: dict[str, str], timeout: float = 3.0):
@@ -465,47 +507,27 @@ async def probe(client: httpx.AsyncClient, url: str, headers: dict[str, str], ti
         return total, resp.status_code == 206, ttfb, received / elapsed
 
 
-async def build_stream(
+def _probe_result(task: asyncio.Task[ProbeResult]) -> ProbeResult | None:
+    if task.cancelled() or task.exception() is not None:
+        return None
+    return task.result()
+
+
+def _assemble(
     client: httpx.AsyncClient,
-    url: str,
-    backups: Iterable[str] = (),
+    sources: list[Source],
+    total: int,
+    headers: dict[str, str],
     *,
-    headers: dict[str, str] | None = None,
-    concurrency: int = 8,
-    chunk_size: int = 512 * 1024,
-    btr: bool = True,
-    use_mirrors: bool = True,
-) -> BTRStream | SimpleStream:
-    """探测候选节点 → 组装节点池 → 返回可流式读取的对象。"""
-    headers = dict(headers or {})
-    headers.setdefault("Accept-Encoding", "identity")
-    if not btr:
-        return SimpleStream(client, url, headers)
-
-    candidates = expand_mirrors(url, backups) if use_mirrors else list(dict.fromkeys([url, *backups]))
-    results = await asyncio.gather(
-        *(probe(client, u, headers) for u in candidates), return_exceptions=True
-    )
-    sources: list[Source] = []
-    total = 0
-    for cand, res in zip(candidates, results):
-        if isinstance(res, Exception):
-            continue
-        size, ranged, ttfb, throughput = res
-        if not ranged:
-            continue
-        total = total or size
-        sources.append(Source(url=cand, ttfb=ttfb, speed=throughput))
-    if not sources or total <= 0:
-        return SimpleStream(client, url, headers, total_size=total or None)
-
-    # 只留真正跑得动的节点：慢节点会拖住整条流水线
+    concurrency: int,
+    chunk_size: int,
+) -> BTRStream:
+    """用当前已知的节点组装 BTR 流（节点池事后还能继续长）。"""
     best = max(s.speed for s in sources)
-    kept = [s for s in sources if s.speed >= max(best * 0.3, 150 * 1024)]
+    kept = [s for s in sources if s.speed >= max(best * 0.3, SLOW_NODE_FLOOR)]
     if not kept:
         kept = [s for s in sources if s.speed >= best * 0.5] or sources[:1]
-    sources = kept
-    sources.sort(key=lambda s: s.score, reverse=True)
+    kept.sort(key=lambda s: s.score, reverse=True)
 
     # 块越小、并发越高，起播越快；但请求本身也有开销，所以按文件长度折中
     chunk_size = int(min(chunk_size, max(256 * 1024, total / 40)))
@@ -520,7 +542,7 @@ async def build_stream(
     hedge_delay = min(2.5, max(0.8, expected * 2.0))
     stream = BTRStream(
         client,
-        sources,
+        kept,
         total,
         headers,
         concurrency=auto_concurrency,
@@ -528,4 +550,98 @@ async def build_stream(
         hedge_delay=hedge_delay,
     )
     stream.max_concurrency = concurrency
+    return stream
+
+
+async def _graft(
+    stream: BTRStream,
+    probes: dict[asyncio.Task[ProbeResult], str],
+    pending: set[asyncio.Task[ProbeResult]],
+) -> None:
+    """起播之后继续收尾：谁测完谁进池，不等。"""
+    try:
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                res = _probe_result(task)
+                if res is None:
+                    continue
+                size, ranged, ttfb, throughput = res
+                if ranged:
+                    stream.add_source(Source(url=probes[task], ttfb=ttfb, speed=throughput))
+    finally:
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+
+async def build_stream(
+    client: httpx.AsyncClient,
+    url: str,
+    backups: Iterable[str] = (),
+    *,
+    headers: dict[str, str] | None = None,
+    concurrency: int = 8,
+    chunk_size: int = 512 * 1024,
+    btr: bool = True,
+    use_mirrors: bool = True,
+    eager: bool = True,
+    probe_timeout: float = PROBE_TIMEOUT,
+) -> BTRStream | SimpleStream:
+    """探测候选节点 → 组装节点池 → 返回可流式读取的对象。
+
+    eager=True 时不等所有节点测速完毕：第一个真正能用的节点先把流交出去，
+    剩下的探针在后台继续跑、谁测完谁进池。真实网络里九个候选节点常有一两个
+    连不上或卡满超时，等它们全回来会让每次点播白等 2~3 秒；而按序输出本来
+    就只要求"起播时有一个能用的节点"。
+    """
+    headers = dict(headers or {})
+    headers.setdefault("Accept-Encoding", "identity")
+    if not btr:
+        return SimpleStream(client, url, headers)
+
+    candidates = expand_mirrors(url, backups) if use_mirrors else list(dict.fromkeys([url, *backups]))
+    probes: dict[asyncio.Task[ProbeResult], str] = {
+        asyncio.create_task(probe(client, u, headers, timeout=probe_timeout)): u
+        for u in candidates
+    }
+    pending = set(probes)
+
+    sources: list[Source] = []
+    total = 0
+    started = time.monotonic()
+    while pending:
+        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            res = _probe_result(task)
+            if res is None:
+                continue
+            size, ranged, ttfb, throughput = res
+            if not ranged:
+                continue
+            total = total or size
+            sources.append(Source(url=probes[task], ttfb=ttfb, speed=throughput))
+        if not sources or not eager:
+            continue
+        best = max(s.speed for s in sources)
+        # 首个节点够快就直接开播；太慢（5KB/s 那种坑）就再等一小会儿。
+        # total 未知（节点没给 Content-Range/Length）时不能急着返回，否则会退化成单连接。
+        if total > 0 and (
+            best >= SLOW_NODE_FLOOR or not pending or time.monotonic() - started >= EAGER_GRACE
+        ):
+            break
+
+    if not sources or total <= 0:
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        return SimpleStream(client, url, headers, total_size=total or None)
+
+    stream = _assemble(
+        client, sources, total, headers, concurrency=concurrency, chunk_size=chunk_size
+    )
+    if pending:
+        stream.start_grafting(probes, pending)
     return stream
