@@ -124,6 +124,7 @@ echo "[sidecar] 打包 Python 引擎（${TRIPLE}）"
 # uvloop 不打包：它让这个 .so 变成 16MB（压缩后 5MB），多花 ~100ms 启动，
 # 换来的只是本地单条流上不到 1% 的 CPU —— 桌面版不划算。uvicorn 会自动退回
 # asyncio 事件循环，httptools 解析器仍然保留。服务端/网页版装了 uvloop 就用。
+# add-data 用相对路径：Windows Git Bash 会把带分隔符的绝对 POSIX 路径转换坏。
 "$PY" -m PyInstaller \
   --noconfirm \
   --clean \
@@ -134,7 +135,6 @@ echo "[sidecar] 打包 Python 引擎（${TRIPLE}）"
   --workpath "$BUILD_DIR/work" \
   --specpath "$BUILD_DIR" \
   --paths "$ROOT" \
-  # 用相对路径：Windows Git Bash 会把带分隔符的绝对 POSIX 路径转换坏。
   --add-data "bilimuse/web${DATA_SEP}bilimuse/web" \
   --collect-submodules uvicorn \
   --hidden-import uvicorn.logging \
