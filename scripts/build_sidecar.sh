@@ -22,19 +22,61 @@ if [[ -z "$TRIPLE" ]]; then
   exit 1
 fi
 
+# 把 PATH 里的命令名（如 `python`）或绝对路径统一解析成可执行路径。
+# 关键是使用 `command -v`，不能对裸命令名做 `[[ -x python ]]`，否则 CI 会误判。
+resolve_python() {
+  local candidate="$1"
+  if [[ -z "$candidate" ]]; then
+    return 1
+  fi
+  if [[ "$candidate" == */* ]]; then
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+    return 1
+  fi
+  local resolved
+  resolved="$(command -v "$candidate" 2>/dev/null || true)"
+  if [[ -n "$resolved" && -x "$resolved" ]]; then
+    printf '%s\n' "$resolved"
+    return 0
+  fi
+  return 1
+}
+
+venv_python() {
+  local candidate
+  # Unix / Windows（Git Bash）两种 venv 布局都支持。
+  for candidate in "$ROOT/.venv/bin/python" "$ROOT/.venv/Scripts/python.exe"; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 if [[ -n "${PYTHON:-}" ]]; then
-  PY="$PYTHON"
-elif [[ -x "$ROOT/.venv/bin/python" ]]; then
-  PY="$ROOT/.venv/bin/python"
+  if ! PY="$(resolve_python "$PYTHON")"; then
+    echo "[sidecar] PYTHON=$PYTHON 不存在或不可执行" >&2
+    exit 1
+  fi
+elif PY="$(venv_python)"; then
+  :
 else
   echo "[sidecar] 没有 .venv，先建一个并装运行依赖"
-  python3 -m venv "$ROOT/.venv"
-  PY="$ROOT/.venv/bin/python"
+  BOOTSTRAP_PY="$(resolve_python python3 || resolve_python python || true)"
+  if [[ -z "$BOOTSTRAP_PY" ]]; then
+    echo "[sidecar] 找不到可用的 Python，请安装 Python 3.10+ 或设置 PYTHON" >&2
+    exit 1
+  fi
+  "$BOOTSTRAP_PY" -m venv "$ROOT/.venv"
+  if ! PY="$(venv_python)"; then
+    echo "[sidecar] 创建 .venv 成功但没有找到 Python 解释器" >&2
+    exit 1
+  fi
   "$PY" -m pip install -q -r "$ROOT/requirements.txt"
-fi
-if [[ ! -x "$PY" ]]; then
-  echo "[sidecar] 找不到可用的 Python，请安装 Python 3.10+ 或设置 PYTHON" >&2
-  exit 1
 fi
 
 OUT_DIR="$ROOT/desktop/src-tauri/binaries"
@@ -71,6 +113,13 @@ mkdir -p "$OUT_DIR"
 # 也不会在只读 HOME / 沙箱里失败
 export PYINSTALLER_CONFIG_DIR="${PYINSTALLER_CONFIG_DIR:-$ROOT/build/pyinstaller-cache}"
 
+# PyInstaller 的 --strip 在 Windows 上依赖额外 strip 工具，且收益很小；
+# Linux/macOS 用它把 onefile 的体积从 ~22 MB 降到 ~18 MB。
+STRIP_ARGS=()
+if [[ "$EXT" != ".exe" ]]; then
+  STRIP_ARGS=(--strip)
+fi
+
 echo "[sidecar] 打包 Python 引擎（$TRIPLE）"
 # uvloop 不打包：它让这个 .so 变成 16MB（压缩后 5MB），多花 ~100ms 启动，
 # 换来的只是本地单条流上不到 1% 的 CPU —— 桌面版不划算。uvicorn 会自动退回
@@ -79,7 +128,7 @@ echo "[sidecar] 打包 Python 引擎（$TRIPLE）"
   --noconfirm \
   --clean \
   --onefile \
-  --strip \
+  "${STRIP_ARGS[@]}" \
   --name bilimuse-server \
   --distpath "$BUILD_DIR/dist" \
   --workpath "$BUILD_DIR/work" \
