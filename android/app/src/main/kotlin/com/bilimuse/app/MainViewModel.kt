@@ -698,6 +698,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         settingsStore.setPreferLossless(enabled)
     }
 
+    fun setShowBtrDetails(enabled: Boolean) {
+        settingsStore.setShowBtrDetails(enabled)
+    }
+
     // ------------------------------------------------------------------ 自动更新
 
     /** 手动检查：设置页入口。 */

@@ -174,6 +174,7 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
         ) {
             NowPlayingScreen(
                 state = player,
+                showBtrDetails = settings.showBtrDetails,
                 shufflePool = shufflePool,
                 onBack = { showPlayer = false },
                 onTogglePlay = viewModel::togglePlay,
@@ -235,6 +236,7 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
             onConcurrency = viewModel::setConcurrency,
             onChunkSize = viewModel::setChunkSize,
             onLossless = viewModel::setPreferLossless,
+            onShowBtrDetails = viewModel::setShowBtrDetails,
             onAutoCheckUpdates = viewModel::setAutoCheckUpdates,
             onCheckUpdate = viewModel::checkForUpdates,
             onOpenUpdate = {

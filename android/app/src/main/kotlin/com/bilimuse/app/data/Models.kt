@@ -92,6 +92,7 @@ data class EngineSettings(
     val concurrency: Int = 8,
     val chunkSize: Int = 512 * 1024,
     val preferLossless: Boolean = true,
+    val showBtrDetails: Boolean = true,
 ) {
     fun clamp(): EngineSettings = copy(
         concurrency = concurrency.coerceIn(1, 64),

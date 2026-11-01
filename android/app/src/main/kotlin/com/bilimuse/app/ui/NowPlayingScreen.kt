@@ -64,6 +64,7 @@ import kotlin.math.roundToInt
 @Composable
 fun NowPlayingScreen(
     state: PlayerUiState,
+    showBtrDetails: Boolean,
     shufflePool: ShufflePoolState,
     onBack: () -> Unit,
     onTogglePlay: () -> Unit,
@@ -208,8 +209,10 @@ fun NowPlayingScreen(
 
             Spacer(Modifier.height(22.dp))
 
-            EngineCard(state)
-            Spacer(Modifier.height(14.dp))
+            if (showBtrDetails) {
+                EngineCard(state)
+                Spacer(Modifier.height(14.dp))
+            }
 
             val info = state.info
             Text(

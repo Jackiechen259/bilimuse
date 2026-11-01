@@ -17,6 +17,7 @@ class SettingsStore(context: Context) {
             .putInt(KEY_CONCURRENCY, next.concurrency)
             .putInt(KEY_CHUNK, next.chunkSize)
             .putBoolean(KEY_LOSSLESS, next.preferLossless)
+            .putBoolean(KEY_SHOW_BTR_DETAILS, next.showBtrDetails)
             .apply()
         _settings.value = next
         return next
@@ -31,11 +32,15 @@ class SettingsStore(context: Context) {
     fun setPreferLossless(enabled: Boolean): EngineSettings =
         update { it.copy(preferLossless = enabled) }
 
+    fun setShowBtrDetails(enabled: Boolean): EngineSettings =
+        update { it.copy(showBtrDetails = enabled) }
+
     private fun restore(): EngineSettings = EngineSettings(
         btrEnabled = prefs.getBoolean(KEY_BTR, true),
         concurrency = prefs.getInt(KEY_CONCURRENCY, 8),
         chunkSize = prefs.getInt(KEY_CHUNK, 512 * 1024),
         preferLossless = prefs.getBoolean(KEY_LOSSLESS, true),
+        showBtrDetails = prefs.getBoolean(KEY_SHOW_BTR_DETAILS, true),
     ).clamp()
 
     private companion object {
@@ -44,5 +49,6 @@ class SettingsStore(context: Context) {
         const val KEY_CONCURRENCY = "concurrency"
         const val KEY_CHUNK = "chunk_size"
         const val KEY_LOSSLESS = "prefer_lossless"
+        const val KEY_SHOW_BTR_DETAILS = "show_btr_details"
     }
 }

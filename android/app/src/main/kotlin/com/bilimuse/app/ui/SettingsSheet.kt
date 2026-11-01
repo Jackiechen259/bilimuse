@@ -70,6 +70,7 @@ fun SettingsSheet(
     onConcurrency: (Int) -> Unit,
     onChunkSize: (Int) -> Unit,
     onLossless: (Boolean) -> Unit,
+    onShowBtrDetails: (Boolean) -> Unit,
     onAutoCheckUpdates: (Boolean) -> Unit,
     onCheckUpdate: () -> Unit,
     onOpenUpdate: () -> Unit,
@@ -200,6 +201,16 @@ fun SettingsSheet(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
                 )
             }
+
+            Spacer(Modifier.height(22.dp))
+            SectionTitle("播放页")
+
+            SettingSwitch(
+                title = "显示 BTR 详情",
+                description = "关闭后播放页不再显示 BTR 引擎、节点与分块进度卡片",
+                checked = settings.showBtrDetails,
+                onCheckedChange = onShowBtrDetails,
+            )
 
             Spacer(Modifier.height(22.dp))
             SectionTitle("关于")
