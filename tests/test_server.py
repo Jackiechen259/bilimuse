@@ -7,8 +7,28 @@ import pytest
 
 from bilimuse import server
 from bilimuse.config import CACHE_DIR
-from bilimuse.server import parse_range
+from bilimuse.server import load_all_folder_items, parse_range
 from mock_cdn import serve
+
+
+class FakeBili:
+    """只实现 folder_items，用来测整夹翻页，不碰真实网络。"""
+
+    def __init__(self, pages: dict[int, dict]):
+        self.pages = pages
+        self.calls: list[tuple[int, int, int, str]] = []
+
+    async def folder_items(self, media_id, page=1, size=20, keyword=""):
+        self.calls.append((media_id, page, size, keyword))
+        return self.pages.get(page, {"items": [], "has_more": False, "total": 0})
+
+
+def page(items: list[dict], has_more: bool = False, total: int = 0) -> dict:
+    return {"items": items, "has_more": has_more, "total": total}
+
+
+def item(bvid: str, attr: int = 0) -> dict:
+    return {"bvid": bvid, "title": bvid, "attr": attr}
 
 
 @pytest.fixture(scope="module")
@@ -101,3 +121,101 @@ def test_settings_roundtrip(api):
     resp = api.post("/api/settings", json={"concurrency": 999})
     assert resp.json()["concurrency"] <= 64
     api.post("/api/settings", json={"concurrency": 8})
+
+
+def test_demo_folder_all(api):
+    data = api.get("/api/folder/-1/all").json()
+    assert data["total"] == 3
+    assert len(data["items"]) == 3
+    assert all(t["bvid"].startswith("DEMO") for t in data["items"])
+
+    filtered = api.get("/api/folder/-1/all", params={"keyword": "夜"}).json()
+    assert filtered["total"] == 1
+    assert filtered["items"][0]["bvid"] == "DEMO0001"
+
+
+async def test_load_all_folder_items_deduplicates_and_stops():
+    fake = FakeBili(
+        {
+            1: page([item("a"), item("b")], has_more=True, total=4),
+            2: page([item("b"), item("c")], has_more=False, total=4),
+        }
+    )
+    data = await load_all_folder_items(fake, 42, page_gap=0)
+
+    assert [i["bvid"] for i in data["items"]] == ["a", "b", "c"]
+    assert data["total"] == 4
+    assert fake.calls == [(42, 1, 50, ""), (42, 2, 50, "")]
+
+
+async def test_load_all_folder_items_skips_filtered_empty_pages():
+    fake = FakeBili(
+        {
+            1: page([item("a")], has_more=True),
+            2: page([], has_more=True),
+            3: page([item("b")], has_more=False),
+        }
+    )
+    data = await load_all_folder_items(fake, 1, page_gap=0)
+
+    assert [i["bvid"] for i in data["items"]] == ["a", "b"]
+    assert [call[1] for call in fake.calls] == [1, 2, 3]
+
+
+async def test_load_all_folder_items_stops_when_api_repeats_page():
+    fake = FakeBili(
+        {
+            1: page([item("a"), item("b")], has_more=True),
+            2: page([item("a"), item("b")], has_more=True),
+            3: page([item("c")], has_more=False),
+        }
+    )
+    data = await load_all_folder_items(fake, 1, page_gap=0)
+
+    assert [i["bvid"] for i in data["items"]] == ["a", "b"]
+    assert [call[1] for call in fake.calls] == [1, 2]
+
+
+async def test_load_all_folder_items_filters_invalid_items():
+    fake = FakeBili(
+        {
+            1: page(
+                [item("ok"), item("bit0", 1), item("bit3", 8), item("both", 9)],
+                has_more=False,
+            ),
+        }
+    )
+    data = await load_all_folder_items(fake, 1, page_gap=0)
+
+    assert [i["bvid"] for i in data["items"]] == ["ok"]
+
+
+async def test_load_all_folder_items_skips_all_invalid_page():
+    fake = FakeBili(
+        {
+            1: page([item("gone", 1), item("deleted", 8)], has_more=True),
+            2: page([item("b")], has_more=False),
+        }
+    )
+    data = await load_all_folder_items(fake, 1, page_gap=0)
+
+    assert [i["bvid"] for i in data["items"]] == ["b"]
+    assert [call[1] for call in fake.calls] == [1, 2]
+
+
+async def test_load_all_folder_items_respects_max_pages():
+    fake = FakeBili(
+        {p: page([item(f"t{p}")], has_more=True) for p in range(1, 6)}
+    )
+    data = await load_all_folder_items(fake, 1, max_pages=3, page_gap=0)
+
+    assert [i["bvid"] for i in data["items"]] == ["t1", "t2", "t3"]
+    assert [call[1] for call in fake.calls] == [1, 2, 3]
+
+
+async def test_load_all_folder_items_ignores_folder_total_for_search():
+    fake = FakeBili({1: page([item("a")], has_more=False, total=100)})
+    data = await load_all_folder_items(fake, 1, keyword="live", page_gap=0)
+
+    assert data["total"] == 1
+    assert fake.calls == [(1, 1, 50, "live")]

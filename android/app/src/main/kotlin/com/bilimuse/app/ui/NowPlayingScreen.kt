@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.bilimuse.app.R
+import com.bilimuse.app.ShufflePoolState
 import com.bilimuse.app.btr.EngineSnapshot
 import com.bilimuse.app.player.PlayerUiState
 import kotlin.math.roundToInt
@@ -63,6 +64,7 @@ import kotlin.math.roundToInt
 @Composable
 fun NowPlayingScreen(
     state: PlayerUiState,
+    shufflePool: ShufflePoolState,
     onBack: () -> Unit,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
@@ -199,10 +201,14 @@ fun NowPlayingScreen(
                 onShuffle = onShuffle,
             )
 
+            if (state.shuffle) {
+                Spacer(Modifier.height(10.dp))
+                ShuffleScopeHint(shufflePool)
+            }
+
             Spacer(Modifier.height(22.dp))
 
             EngineCard(state)
-
             Spacer(Modifier.height(14.dp))
 
             val info = state.info
@@ -351,6 +357,61 @@ private fun Controls(
                 painter = painterResource(repeatIcon),
                 contentDescription = "循环模式",
                 tint = if (state.repeatMode == Player.REPEAT_MODE_OFF) BiliMuted else BiliPink,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ShuffleScopeHint(pool: ShufflePoolState) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        when {
+            pool.preparing -> {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(12.dp),
+                    color = BiliPink,
+                    strokeWidth = 1.5.dp,
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    text = buildString {
+                        append("正在加载")
+                        append(pool.scope)
+                        when {
+                            pool.total > 0 -> append(" ${pool.loaded}/${pool.total}")
+                            pool.loaded > 0 -> append(" · 已加载 ${pool.loaded} 首")
+                        }
+                        append("…")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = BiliMuted,
+                )
+            }
+            pool.error != null -> Text(
+                text = if (pool.loaded > 0) {
+                    "加载失败，随机仅限已加载的 ${pool.loaded} 首"
+                } else {
+                    "加载失败，随机仍限已加载内容"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = BiliDanger,
+                textAlign = TextAlign.Center,
+            )
+            pool.ready -> Text(
+                text = "随机范围：${pool.scope} · ${pool.loaded} 首",
+                style = MaterialTheme.typography.bodySmall,
+                color = BiliMuted,
+                textAlign = TextAlign.Center,
+            )
+            else -> Text(
+                text = "随机范围：已加载内容",
+                style = MaterialTheme.typography.bodySmall,
+                color = BiliMuted,
+                textAlign = TextAlign.Center,
             )
         }
     }

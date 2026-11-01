@@ -20,6 +20,25 @@ const state = {
   loginMode: 'qr',    // 当前登录弹窗的 tab：qr / password / sms
   settings: { btr_enabled: true, concurrency: 8 },
   playToken: 0,
+  // 随机播放：列表只加载前 50 条，随机池需要整夹（或全部搜索结果）
+  keyword: '',          // 当前列表对应的搜索词，不是输入框的实时值
+  shuffle: false,
+  shuffleLoading: false,
+  shuffleError: '',
+  shuffleScope: '整个收藏夹',
+  shuffleGen: 0,
+  shuffleKey: '',
+  shufflePromise: null,
+  shuffleAbort: null,
+  shuffleCache: new Map(),  // "folderId:keyword" -> { items, total }
+  queue: [],            // 当前播放顺序；随机模式下是整个收藏夹的随机排列
+  queuePos: -1,
+  queueShuffled: false,
+  queueKey: '',
+  queueSource: null,    // 当前播放队列对应的 { folderId, keyword }
+  playSourceKey: '',
+  playRequest: 0,
+  requestedBvid: '',
 };
 
 /* ------------------------------------------------------------------ 工具 */
@@ -67,6 +86,226 @@ function debounce(fn, wait) {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), wait);
   };
+}
+
+/* ------------------------------------------------------------------ 随机池 */
+
+function currentView() {
+  return { folderId: state.folderId, keyword: state.keyword || '' };
+}
+
+function viewKey(source) {
+  return `${source.folderId}:${(source.keyword || '').toLowerCase()}`;
+}
+
+function shuffleArray(list) {
+  const out = list.slice();
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/** 当前曲目放队首，其余随机；没有当前曲目时整队随机。 */
+function buildShuffleQueue(items, currentBvid) {
+  const rest = items.filter((t) => t.bvid !== currentBvid);
+  const shuffled = shuffleArray(rest);
+  if (!currentBvid) return shuffled;
+  const current = items.find((t) => t.bvid === currentBvid);
+  return current ? [current, ...shuffled] : shuffled;
+}
+
+function updateShuffleUi() {
+  const btn = $('shuffle');
+  if (!btn) return;
+  btn.classList.toggle('active', state.shuffle);
+  btn.setAttribute('aria-pressed', String(state.shuffle));
+  const hint = $('shuffle-hint');
+  if (!hint) return;
+  if (!state.shuffle) {
+    hint.classList.add('hidden');
+    hint.classList.remove('error');
+    return;
+  }
+  hint.classList.remove('hidden');
+  hint.classList.toggle('error', Boolean(state.shuffleError));
+  if (state.shuffleLoading) {
+    hint.textContent = `正在加载${state.shuffleScope}，请稍候…`;
+  } else if (state.shuffleError) {
+    hint.textContent = '加载失败，随机仅限已加载内容';
+  } else if (state.queueShuffled && state.queue.length) {
+    const scope = state.queueSource && state.queueSource.keyword ? '全部搜索结果' : '整个收藏夹';
+    hint.textContent = `随机范围：${scope} · ${state.queue.length} 首`;
+  } else {
+    hint.textContent = '随机：点任意一首后补全整个收藏夹';
+  }
+}
+
+async function loadShuffleQueue(source, key) {
+  const gen = ++state.shuffleGen;
+  if (state.shuffleAbort) state.shuffleAbort.abort();
+  const controller = new AbortController();
+  state.shuffleAbort = controller;
+  state.shuffleLoading = true;
+  state.shuffleError = '';
+  state.shuffleScope = source.keyword ? '全部搜索结果' : '整个收藏夹';
+  updateShuffleUi();
+
+  try {
+    const qs = new URLSearchParams();
+    if (source.keyword) qs.set('keyword', source.keyword);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const data = await api(`/api/folder/${source.folderId}/all${suffix}`, {
+      signal: controller.signal,
+    });
+    if (gen !== state.shuffleGen) return null;
+    const items = (data.items || []).filter((t) => t && t.bvid);
+    if (!items.length) throw new Error('收藏夹里没有可播放的内容');
+    const entry = { items, total: Number(data.total) || items.length };
+    state.shuffleCache.set(key, entry);
+    state.shuffleLoading = false;
+    state.shuffleError = '';
+    updateShuffleUi();
+    return entry;
+  } catch (err) {
+    if (gen !== state.shuffleGen) return null;
+    state.shuffleLoading = false;
+    if (err.name === 'AbortError') {
+      updateShuffleUi();
+      return null;
+    }
+    state.shuffleError = err.message || '加载失败';
+    console.warn('[shuffle] 加载整个收藏夹失败', err);
+    updateShuffleUi();
+    return null;
+  } finally {
+    if (state.shuffleAbort === controller) state.shuffleAbort = null;
+  }
+}
+
+/**
+ * 确保某个收藏夹视图的整夹列表已加载。
+ * 同一视图的并发调用共享同一个 Promise，避免连点「下一首」时反复重拉。
+ */
+function ensureShuffleQueue(source) {
+  const key = viewKey(source);
+  const cached = state.shuffleCache.get(key);
+  if (cached) {
+    if (state.shuffleLoading) {
+      state.shuffleGen += 1;
+      if (state.shuffleAbort) state.shuffleAbort.abort();
+      state.shuffleAbort = null;
+      state.shuffleLoading = false;
+      state.shuffleKey = '';
+      state.shufflePromise = null;
+      updateShuffleUi();
+    }
+    return Promise.resolve(cached);
+  }
+  if (state.shuffleLoading && state.shuffleKey === key && state.shufflePromise) {
+    return state.shufflePromise;
+  }
+
+  state.shuffleKey = key;
+  const promise = loadShuffleQueue(source, key).finally(() => {
+    if (state.shufflePromise === promise) {
+      state.shufflePromise = null;
+      state.shuffleKey = '';
+    }
+  });
+  state.shufflePromise = promise;
+  return promise;
+}
+
+function applyShuffleQueue(source, entry, currentBvid) {
+  state.queue = buildShuffleQueue(entry.items, currentBvid);
+  state.queuePos = currentBvid ? 0 : -1;
+  state.queueShuffled = true;
+  state.queueKey = viewKey(source);
+  state.queueSource = { ...source };
+  state.shuffleError = '';
+  updateShuffleUi();
+}
+
+/** 队列已经属于同一视图时保留现有随机顺序，只移动当前位置。 */
+function applyShuffleQueueForTrack(source, entry, track) {
+  const key = viewKey(source);
+  if (state.queueShuffled && state.queueKey === key) {
+    const pos = state.queue.findIndex((t) => t.bvid === track.bvid);
+    if (pos >= 0) {
+      state.queuePos = pos;
+      state.shuffleError = '';
+      updateShuffleUi();
+      return;
+    }
+  }
+  applyShuffleQueue(source, entry, track.bvid);
+}
+
+function startTrack(track, visibleIndex, source) {
+  state.index = visibleIndex;
+  state.playSourceKey = viewKey(source);
+  state.queueSource = { ...source };
+  const requestId = ++state.playRequest;
+  playTrackNow(track);
+
+  if (!state.shuffle) {
+    state.queueShuffled = false;
+    state.queue = state.tracks.slice();
+    state.queuePos = visibleIndex;
+    state.queueKey = state.playSourceKey;
+    updateShuffleUi();
+    return;
+  }
+
+  // 整夹还没加载好时，先退回当前列表顺序；加载完成后再替换成整夹随机队列。
+  state.queueShuffled = false;
+  state.queue = state.tracks.slice();
+  state.queuePos = visibleIndex;
+  state.queueKey = state.playSourceKey;
+
+  const key = state.playSourceKey;
+  ensureShuffleQueue(source).then((entry) => {
+    if (!entry || !state.shuffle) return;
+    if (requestId !== state.playRequest) return;   // 用户已经点了别的歌
+    if (state.playSourceKey !== key) return;
+    applyShuffleQueueForTrack(source, entry, track);
+  });
+  updateShuffleUi();
+}
+
+async function toggleShuffle() {
+  state.shuffle = !state.shuffle;
+  state.shuffleError = '';
+  if (!state.shuffle) {
+    state.shuffleGen += 1;
+    if (state.shuffleAbort) state.shuffleAbort.abort();
+    state.shuffleAbort = null;
+    state.shuffleKey = '';
+    state.shufflePromise = null;
+    state.shuffleLoading = false;
+    state.queueShuffled = false;
+    const idx = state.current
+      ? state.tracks.findIndex((t) => t.bvid === state.current.bvid)
+      : state.index;
+    state.index = idx;
+    state.queue = state.tracks.slice();
+    state.queuePos = idx;
+    updateShuffleUi();
+    return;
+  }
+
+  updateShuffleUi();
+  // 还没开始播放时不急着拉整夹；用户点任意一首后 startTrack 会自动补全。
+  if (!state.current) return;
+
+  const source = state.queueSource || currentView();
+  if (!source || source.folderId === null) return;
+  const requestId = state.playRequest;
+  const entry = await ensureShuffleQueue(source);
+  if (!entry || !state.shuffle || requestId !== state.playRequest) return;
+  applyShuffleQueueForTrack(source, entry, state.current);
 }
 
 /* ------------------------------------------------------------------ 账号 */
@@ -149,6 +388,7 @@ async function selectFolder(id, title) {
 
 async function loadTracks(title, keyword = '') {
   const box = $('tracks');
+  state.keyword = keyword;
   $('folder-title').textContent = title || '收藏夹';
   $('folder-meta').textContent = '正在加载…';
   try {
@@ -156,6 +396,9 @@ async function loadTracks(title, keyword = '') {
     if (keyword) qs.set('keyword', keyword);
     const data = await api(`/api/folder/${state.folderId}?${qs}`);
     state.tracks = data.items || [];
+    state.index = state.current
+      ? state.tracks.findIndex((t) => t.bvid === state.current.bvid)
+      : -1;
     $('folder-title').textContent = data.title || title || '收藏夹';
     const count = data.total || state.tracks.length;
     $('folder-meta').textContent = state.demo
@@ -164,6 +407,7 @@ async function loadTracks(title, keyword = '') {
     renderTracks();
   } catch (err) {
     state.tracks = [];
+    state.index = -1;
     $('folder-meta').textContent = err.message;
     if (err.status === 401) openLogin();
     renderTracks();
@@ -182,6 +426,7 @@ function renderTracks() {
     const row = document.createElement('div');
     row.className = 'track';
     row.dataset.index = String(i);
+    row.dataset.bvid = track.bvid;
     if (state.current && state.current.bvid === track.bvid) row.classList.add('active');
 
     const idx = document.createElement('div');
@@ -220,10 +465,13 @@ function renderTracks() {
 
 /* ------------------------------------------------------------------ 播放 */
 
-async function playIndex(i) {
+function playIndex(i) {
   if (i < 0 || i >= state.tracks.length) return;
-  state.index = i;
-  const track = state.tracks[i];
+  startTrack(state.tracks[i], i, currentView());
+}
+
+async function playTrackNow(track) {
+  state.requestedBvid = track.bvid;
   const token = ++state.playToken;
 
   $('now-title').textContent = track.title;
@@ -233,7 +481,7 @@ async function playIndex(i) {
   $('now-cover').textContent = track.cover ? '' : '♪';
   $('stats').textContent = '正在探测 CDN 节点…';
   document.querySelectorAll('.track').forEach((el) => {
-    el.classList.toggle('active', Number(el.dataset.index) === i);
+    el.classList.toggle('active', el.dataset.bvid === track.bvid);
   });
 
   try {
@@ -272,6 +520,30 @@ function togglePlay() {
 }
 
 function playNext(step = 1) {
+  if (state.shuffle && state.queueShuffled && state.queue.length) {
+    let pos = state.queuePos;
+    if (pos < 0) {
+      pos = Math.floor(Math.random() * state.queue.length);
+    } else {
+      pos += step;
+      if (pos >= state.queue.length) {
+        // 播到队尾后重新洗牌，随机播放不中断
+        const last = state.current ? state.current.bvid : '';
+        state.queue = shuffleArray(state.queue);
+        pos = 0;
+        if (state.queue.length > 1 && state.queue[0].bvid === last) pos = 1;
+      } else if (pos < 0) {
+        pos = state.queue.length - 1;
+      }
+    }
+    state.queuePos = pos;
+    const track = state.queue[pos];
+    state.index = state.tracks.findIndex((t) => t.bvid === track.bvid);
+    playTrackNow(track);
+    updateShuffleUi();
+    return;
+  }
+
   if (!state.tracks.length) return;
   const next = state.index + step;
   if (next < 0) return playIndex(state.tracks.length - 1);
@@ -421,6 +693,24 @@ function afterLogin(user) {
   state.index = -1;
   state.current = null;
   state.playToken += 1;      // 让上一个账号正在解析的音轨作废
+  state.keyword = '';
+  state.shuffle = false;
+  state.shuffleGen += 1;
+  if (state.shuffleAbort) state.shuffleAbort.abort();
+  state.shuffleAbort = null;
+  state.shuffleKey = '';
+  state.shufflePromise = null;
+  state.shuffleLoading = false;
+  state.shuffleError = '';
+  state.shuffleCache.clear();
+  state.queue = [];
+  state.queuePos = -1;
+  state.queueShuffled = false;
+  state.queueKey = '';
+  state.queueSource = null;
+  state.playSourceKey = '';
+  state.playRequest += 1;
+  state.requestedBvid = '';
   const audio = $('audio');
   audio.pause();
   audio.removeAttribute('src');
@@ -432,6 +722,7 @@ function afterLogin(user) {
   $('stats').textContent = 'BTR 待机';
   renderAccount();
   renderTracks();
+  updateShuffleUi();
 }
 
 function pollLogin(key) {
@@ -572,6 +863,7 @@ async function boot() {
     state.settings = data.settings;
     $('login-tabs').classList.toggle('hidden', !state.desktop);
     renderAccount();
+    updateShuffleUi();
     $('btr-toggle').checked = data.settings.btr_enabled;
     $('concurrency').value = String(data.settings.concurrency);
     $('engine-hint').textContent = data.settings.btr_enabled
@@ -594,6 +886,7 @@ async function boot() {
 $('play').addEventListener('click', togglePlay);
 $('prev').addEventListener('click', () => playNext(-1));
 $('next').addEventListener('click', () => playNext(1));
+$('shuffle').addEventListener('click', toggleShuffle);
 $('login-btn').addEventListener('click', openLogin);
 $('close-modal').addEventListener('click', () => closeLogin());
 $('login-modal').addEventListener('click', (evt) => {
@@ -659,6 +952,7 @@ document.addEventListener('keydown', (evt) => {
   else if (evt.code === 'ArrowLeft') $('audio').currentTime -= 5;
   else if (evt.code === 'KeyN') playNext(1);
   else if (evt.code === 'KeyP') playNext(-1);
+  else if (evt.code === 'KeyS') toggleShuffle();
 });
 
 window.addEventListener('beforeunload', stopStats);

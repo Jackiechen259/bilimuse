@@ -96,10 +96,12 @@
 
     <div class="controls">
       <div class="buttons">
+        <button id="shuffle" title="随机播放（整个收藏夹）" aria-pressed="false">🔀</button>
         <button id="prev" title="上一首">⏮</button>
         <button id="play" class="play" title="播放 / 暂停">▶</button>
         <button id="next" title="下一首">⏭</button>
       </div>
+      <div class="shuffle-hint hidden" id="shuffle-hint"></div>
       <div class="seek-row">
         <span class="time" id="t-cur">0:00</span>
         <div class="seek" id="seek">

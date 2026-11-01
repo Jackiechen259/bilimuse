@@ -12,7 +12,7 @@ BiliMuse 把这两件事一起解决：扫码登录后直接列出你的收藏�
 ## 特性
 
 - **多种登录方式**：扫码，或在桌面版里用账号密码 / 手机验证码登录（内嵌 B 站官方登录页完成极验人机验证，只接收登录 cookie，不保存密码）；登录态只写本机 `~/.config/bilimuse/session.json`（权限 0600）
-- **收藏夹即歌单**：列出全部收藏夹、支持夹内搜索、顺序/循环播放、上一首下一首、空格键控制
+- **收藏夹即歌单**：列出全部收藏夹、支持夹内搜索、顺序/循环播放、上一首下一首、空格键控制；随机播放会补全整个收藏夹（或全部搜索结果），不会只随机已加载的分页
 - **音质优先**：Hi-Res 无损 → 杜比全景声 → 最高码率（192K/132K/64K），有无损就播无损
 - **BTR 引擎**：多 Range 并发、多 CDN 节点竞速、慢块对冲、断点续传、按实时速度加权调度
 - **起播不等测速**：第一个可用节点先开播，剩下的镜像在后台边测边补进节点池
@@ -98,7 +98,8 @@ sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
 
 原生 Kotlin 版本：Compose 手机界面 + Media3/ExoPlayer，BTR 引擎直接作为 DataSource 接入，
 不需要在手机上跑 Python 或本地 HTTP 服务。支持后台播放、通知栏/锁屏控制、随机/循环、
-夹内搜索、分页加载，不登录也可以先玩演示模式。登录支持**扫码**、**账号密码**和
+夹内搜索、分页加载，不登录也可以先玩演示模式。随机播放会自动补全**整个收藏夹**
+（或全部搜索结果），不会只随机已经加载过的分页。登录支持**扫码**、**账号密码**和
 **手机验证码**：后两种需要 B 站极验，App 内嵌 B 站官方登录页完成验证，成功后只把
 登录 cookie 换进原生会话，密码不经过 App 代码。
 
@@ -208,7 +209,7 @@ bilimuse/
 │   │   ├── data/       # WBI 签名、B 站 API、登录态、演示 CDN、自动更新
 │   │   ├── player/     # MediaSessionService / MediaController / DataSource
 │   │   └── ui/         # Compose 界面
-│   └── app/src/test/   # 28 个 JVM 测试
+│   └── app/src/test/   # 39 个 JVM 测试
 ├── scripts/            # 基准脚本 + 边车打包 / 图标生成
 ├── tests/              # 测试：引擎正确性、限速场景提速、断流恢复、Range、启动器
 └── docs/               # ARCHITECTURE.md / DESKTOP.md / ANDROID.md
@@ -237,7 +238,7 @@ bilimuse/
 ## 测试
 
 ```bash
-.venv/bin/python -m pytest -q      # 31 passed
+.venv/bin/python -m pytest -q      # 39 passed
 ```
 
 桌面登录桥（回环 HTTP 解析 / chunked / cookie 域过滤）另有 7 个 Rust 单元测试：
@@ -246,7 +247,7 @@ bilimuse/
 cd desktop/src-tauri && cargo test --release login
 ```
 
-安卓版的引擎、WBI 签名、演示 CDN、音轨选择和自动更新另有 28 个纯 JVM 测试（不需要模拟器）：
+安卓版的引擎、WBI 签名、演示 CDN、音轨选择和自动更新另有 39 个纯 JVM 测试（不需要模拟器）：
 
 ```bash
 cd android && ./gradlew :app:testDebugUnitTest

@@ -253,6 +253,9 @@ APK 资产的选择规则：优先名字带 `universal` 的；其次没有 ABI �
 - 登录态只写应用私有目录；密码和短信验证码只在官方登录页内处理，App 不保存
 - 收藏夹列表、夹内搜索、分页加载（每页 30 条）
 - 点击播放、队列、上一首/下一首、拖动进度、随机、单曲循环/列表循环
+- 随机播放覆盖**整个收藏夹**：开启随机后会在后台把剩余分页全部拉下来，再补进播放队列，
+  不再局限于列表已经加载过的内容；夹内搜索时同样覆盖全部搜索结果。播放页会显示
+  「正在加载整个收藏夹 x/y」以及最终的随机范围
 - 音质优先级：Hi-Res 无损 → 杜比全景声 → 最高码率
 - BTR 开关、并发数（2–24）、分块大小（256 KB / 512 KB / 1 MB）、无损优先
 - 实时引擎指标：节点、并发、块进度、瞬时速度、对冲/重试次数
@@ -305,7 +308,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 
 ## 测试
 
-`./gradlew :app:testDebugUnitTest` 共 28 个 JVM 测试：
+`./gradlew :app:testDebugUnitTest` 共 39 个 JVM 测试：
 
 - **WbiTest**：mixin key、`w_rid`、中文/空格/特殊字符编码与 Python 实现一致
 - **BtrEngineTest**：
@@ -316,6 +319,8 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 - **PickAudioTest**：无损优先、关闭无损时选最高码率、无音轨时报错
 - **SessionDataTest**：登录态 JSON 序列化/反序列化、cookie 头、未登录判定
 - **CookieParsingTest**：WebView Cookie 头解析（值里带 `=`、空项、空白）
+- **FolderPagerTest**：整夹翻页（逐页请求、bvid 去重、空页/重复页/页数上限停止、进度回调）
+  与随机队列去重
 - **UpdateModelsTest**：版本号解析/排序、预发布版优先级、通用/ABI APK 选择、Release → AppUpdate、草稿/预发布过滤
 - **GitHubReleaseApiTest**：MockWebServer 模拟 404、正常 Release、403 限流、坏 JSON，并检查请求路径与 `Accept` 头
 
@@ -324,7 +329,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 ## 已验证
 
 - `:app:assembleDebug` 成功，产物 `app-debug.apk` 约 14 MB
-- 28 个 JVM 测试全部通过
+- 39 个 JVM 测试全部通过
 - JVM 基准（1 MB 文件、每条连接 400 KB/s）：单连接 ~2.6 s，BTR 645 ms，**约 4.1x**
 - 真实 B 站二维码接口冒烟通过：生成 `account.bilibili.com` 扫码 URL，轮询返回 `pending`
 - Compose 界面在 Robolectric 中以 411×891 dp 真实渲染通过，截图见 `assets/android*.png`
@@ -336,7 +341,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 
 ## 已知限制
 
-- 开发机没有可用的 KVM，**尚未在真机/模拟器上做完整的扫码 → 播放回归**；目前已验证编译、28 个 JVM 测试、真实二维码接口和 Robolectric 界面渲染。第一次装到手机上建议先用「演示模式」确认播放链路
+- 开发机没有可用的 KVM，**尚未在真机/模拟器上做完整的扫码 → 播放回归**；目前已验证编译、39 个 JVM 测试、真实二维码接口和 Robolectric 界面渲染。第一次装到手机上建议先用「演示模式」确认播放链路
 - 自动更新需要 Release 已发布且包含 APK 资产；草稿 / Pre-release 不会被应用看到
 - Android 要求用户在系统安装器里确认，无法像桌面版那样静默安装；下载过程也不驻留后台服务
 - 自动更新的系统安装器、未知来源授权流程尚未在真机上回归（开发机没有可用 KVM）

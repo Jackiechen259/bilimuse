@@ -416,6 +416,71 @@ async def api_logout() -> dict[str, Any]:
 
 # ------------------------------------------------------------------ 收藏夹
 
+# 随机播放整个收藏夹时，一次把分页全部拉完。
+FULL_PAGE_SIZE = 50
+FULL_MAX_PAGES = 200
+FULL_MAX_EMPTY_PAGES = 3
+FULL_PAGE_GAP = 0.1
+
+
+async def load_all_folder_items(
+    bili: BiliClient,
+    media_id: int,
+    keyword: str = "",
+    *,
+    page_size: int = FULL_PAGE_SIZE,
+    max_pages: int = FULL_MAX_PAGES,
+    page_gap: float = FULL_PAGE_GAP,
+) -> dict[str, Any]:
+    """把一个收藏夹（或搜索结果）的所有分页拉完，供「随机播放整个收藏夹」使用。
+
+    规则与安卓端 FolderPager 保持一致：
+    - 按 bvid 去重，保留接口返回顺序；
+    - has_more=false 时停止；
+    - 整页失效稿件被过滤成空页时继续翻，连续空页超过上限才停止；
+    - 整页都是重复数据时停止（接口忽略 pn 的死循环保护）。
+    """
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    total = 0
+    page = 1
+    empty_pages = 0
+    while page <= max_pages:
+        data = await bili.folder_items(media_id, page, page_size, keyword)
+        raw = data.get("items") or []
+        valid = 0
+        added = 0
+        for item in raw:
+            bvid = str(item.get("bvid") or "")
+            if not bvid:
+                continue
+            if int(item.get("attr") or 0) & 9:
+                continue
+            valid += 1
+            if bvid in seen:
+                continue
+            seen.add(bvid)
+            items.append(item)
+            added += 1
+        if not keyword:
+            total = int(data.get("total") or total)
+        if not data.get("has_more"):
+            break
+        if not raw or valid == 0:
+            # 空页，或整页都是失效稿件（会被过滤掉）：继续往后翻。
+            empty_pages += 1
+            if empty_pages >= FULL_MAX_EMPTY_PAGES:
+                break
+        else:
+            empty_pages = 0
+            if added == 0:
+                # 整页都是重复数据：接口没有按 pn 翻页，继续只会死循环。
+                break
+        page += 1
+        if page <= max_pages and page_gap > 0:
+            await asyncio.sleep(page_gap)
+    return {"items": items, "total": total or len(items)}
+
 
 @app.get("/api/folders")
 async def api_folders() -> dict[str, Any]:
@@ -425,6 +490,22 @@ async def api_folders() -> dict[str, Any]:
     assert bili is not None
     try:
         return {"folders": await bili.folders()}
+    except (BiliError, httpx.HTTPError) as exc:
+        raise _http_error(exc)
+
+
+@app.get("/api/folder/{fid}/all")
+async def api_folder_all(fid: int, keyword: str = "") -> dict[str, Any]:
+    """整夹内容：随机播放要覆盖全部视频，不能只取第一页。"""
+    if state.demo_mode:
+        items = [dict(t) for t in demo.DEMO_TRACKS]
+        if keyword:
+            items = [t for t in items if keyword.lower() in t["title"].lower()]
+        return {"items": items, "total": len(items)}
+    bili = state.bili
+    assert bili is not None
+    try:
+        return await load_all_folder_items(bili, fid, keyword)
     except (BiliError, httpx.HTTPError) as exc:
         raise _http_error(exc)
 

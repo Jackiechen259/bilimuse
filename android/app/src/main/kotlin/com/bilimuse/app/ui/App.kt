@@ -40,6 +40,7 @@ import kotlinx.coroutines.launch
 fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
     val library by viewModel.library.collectAsStateWithLifecycle()
     val player by viewModel.playerState.collectAsStateWithLifecycle()
+    val shufflePool by viewModel.shufflePool.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val update by viewModel.update.collectAsStateWithLifecycle()
     val autoCheckUpdates by viewModel.autoCheckUpdates.collectAsStateWithLifecycle()
@@ -173,6 +174,7 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
         ) {
             NowPlayingScreen(
                 state = player,
+                shufflePool = shufflePool,
                 onBack = { showPlayer = false },
                 onTogglePlay = viewModel::togglePlay,
                 onNext = viewModel::next,

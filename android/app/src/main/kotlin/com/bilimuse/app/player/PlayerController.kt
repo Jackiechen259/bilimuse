@@ -15,6 +15,7 @@ import com.bilimuse.app.btr.EngineSnapshot
 import com.bilimuse.app.data.StreamRegistry
 import com.bilimuse.app.data.TrackInfo
 import com.bilimuse.app.data.TrackItem
+import com.bilimuse.app.data.missingQueueTracks
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -68,6 +69,12 @@ class PlayerController(
     private var controller: MediaController? = null
     private var ticker: Job? = null
 
+    /**
+     * 当前播放队列里的 bvid，用来在补全整个收藏夹时去重。
+     * 只在本进程内维护；MediaController 重连时从播放器实际队列重建。
+     */
+    private val queueIds = LinkedHashSet<String>()
+
     private val _state = MutableStateFlow(PlayerUiState())
     val state: StateFlow<PlayerUiState> = _state.asStateFlow()
 
@@ -104,6 +111,7 @@ class PlayerController(
                 return@addListener
             }
             controller = c
+            syncQueueIds(c)
             c.addListener(listener)
             _state.update { it.copy(connected = true) }
             sync()
@@ -174,9 +182,43 @@ class PlayerController(
         }
         val index = startIndex.coerceIn(0, items.lastIndex)
         val mediaItems = items.map { it.toMediaItem() }
+        queueIds.clear()
+        items.forEach { item -> item.bvid.takeIf { it.isNotBlank() }?.let(queueIds::add) }
         c.setMediaItems(mediaItems, index, 0L)
         c.prepare()
         c.play()
+    }
+
+    /**
+     * 把音轨补到当前队列末尾（已存在的按 bvid 跳过）。
+     *
+     * 随机播放需要整个收藏夹都在队列里，但一次性 setMediaItems 上千条会撑爆
+     * MediaController 的 Binder 事务，所以这里分批 addMediaItems。
+     * 返回实际补进去的条数。
+     */
+    fun appendToQueue(items: List<TrackItem>): Int {
+        if (items.isEmpty()) return 0
+        val c = controller ?: return 0
+        val missing = missingQueueTracks(queueIds, items)
+        if (missing.isEmpty()) return 0
+        var added = 0
+        for (batch in missing.chunked(QUEUE_APPEND_BATCH)) {
+            c.addMediaItems(batch.map { it.toMediaItem() })
+            batch.forEach { item -> queueIds.add(item.bvid) }
+            added += batch.size
+        }
+        return added
+    }
+
+    fun queueSize(): Int = controller?.mediaItemCount ?: queueIds.size
+
+    fun isShuffleEnabled(): Boolean = controller?.shuffleModeEnabled ?: false
+
+    private fun syncQueueIds(c: MediaController) {
+        queueIds.clear()
+        for (index in 0 until c.mediaItemCount) {
+            c.getMediaItemAt(index).mediaId.takeIf { it.isNotBlank() }?.let(queueIds::add)
+        }
     }
 
     fun togglePlay() {
@@ -210,6 +252,7 @@ class PlayerController(
             it.stop()
             it.clearMediaItems()
         }
+        queueIds.clear()
     }
 
     fun seekTo(positionMs: Long) {
@@ -232,6 +275,7 @@ class PlayerController(
     fun release() {
         ticker?.cancel()
         ticker = null
+        queueIds.clear()
         controller?.let {
             it.removeListener(listener)
             it.release()
@@ -253,5 +297,10 @@ class PlayerController(
             .setUri("bilimuse://track/$bvid")
             .setMediaMetadata(metadata)
             .build()
+    }
+
+    private companion object {
+        /** 每次 addMediaItems 的批量大小：太大可能触发 Binder 事务上限。 */
+        const val QUEUE_APPEND_BATCH = 80
     }
 }
