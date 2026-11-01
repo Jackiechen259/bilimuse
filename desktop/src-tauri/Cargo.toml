@@ -1,6 +1,6 @@
 [package]
 name = "bilimuse-desktop"
-version = "0.2.0"
+version = "0.2.1"
 description = "BiliMuse 桌面壳：Tauri 窗口 + Python 引擎边车"
 authors = ["Jackiechen259"]
 edition = "2021"

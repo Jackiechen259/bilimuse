@@ -113,7 +113,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:assembleRelease
 
 # 本地模拟 CI 的发布版本号（自动更新比较的就是 versionName）
-./gradlew :app:assembleRelease -PbilimuseVersionName=0.2.0 -PbilimuseVersionCode=200
+./gradlew :app:assembleRelease -PbilimuseVersionName=0.2.1 -PbilimuseVersionCode=201
 ```
 
 第一次构建会下载 Compose、Media3、OkHttp、Coil、ZXing 等依赖，约 1–3 分钟。
@@ -216,15 +216,15 @@ base64 -w0 bilimuse-release.jks   # macOS 用：base64 -i bilimuse-release.jks
 2. 打 tag 并推送：
 
    ```bash
-   git tag v0.2.0
-   git push origin v0.2.0
+   git tag v0.2.1
+   git push origin v0.2.1
    ```
 
 3. `.github/workflows/release.yml` 的 `android` job 会：
-   - 从 tag 解析 `versionName=0.2.0`、`versionCode=200`
+   - 从 tag 解析 `versionName=0.2.1`、`versionCode=201`
      （`major * 10000 + minor * 100 + patch`）；
    - 用 JDK 17 构建 `:app:assembleRelease`（有 Secrets 就用正式签名）；
-   - 把 APK 命名为 `BiliMuse-android-0.2.0.apk`，上传到同一个**草稿** Release。
+   - 把 APK 命名为 `BiliMuse-android-0.2.1.apk`，上传到同一个**草稿** Release。
 4. 打开 GitHub 的草稿 Release，确认 APK 已上传，再点 **Publish release**。只有发布后，
    应用内检查才能看到它。
 5. 已安装旧版本的设备在下次冷启动（或手动检查）时会看到更新。
@@ -334,7 +334,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 - JVM 基准（1 MB 文件、每条连接 400 KB/s）：单连接 ~2.6 s，BTR 645 ms，**约 4.1x**
 - 真实 B 站二维码接口冒烟通过：生成 `account.bilibili.com` 扫码 URL，轮询返回 `pending`
 - Compose 界面在 Robolectric 中以 411×891 dp 真实渲染通过，截图见 `assets/android*.png`
-- `:app:assembleRelease`（R8 + resource shrinking + lintVital）成功，v0.2.0 测试包 2.5 MB（versionCode 200，release 回退签名）
+- `:app:assembleRelease`（R8 + resource shrinking + lintVital）成功，v0.2.1 测试包 2.5 MB（versionCode 201，release 回退签名）
 - APK manifest：`com.bilimuse.app`、minSdk 26、targetSdk 35、前台媒体服务、通知权限、
   `REQUEST_INSTALL_PACKAGES` 与 FileProvider 齐全
 - debug 与 release 包均通过 apksigner v2 校验（未配置正式签名时使用项目内 debug key，可直接 `adb install`）

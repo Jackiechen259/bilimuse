@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bilimuse"
-version = "0.2.0"
+version = "0.2.1"
 description = "BiliMuse —— 把 B 站收藏夹变成私人音乐库，内置 BTR 多线程 / 多 CDN 流式加速"
 readme = "README.md"
 requires-python = ">=3.10"

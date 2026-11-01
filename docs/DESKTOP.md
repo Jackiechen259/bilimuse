@@ -268,8 +268,8 @@ cat .tauri/bilimuse.key.pub   # 填到 tauri.conf.json 的 plugins.updater.pubke
 2. 提交后打 tag 并推送：
 
    ```bash
-   git tag v0.1.1
-   git push origin v0.1.1
+   git tag v0.2.1
+   git push origin v0.2.1
    ```
 
 3. `.github/workflows/release.yml` 会为 Linux / Windows / macOS 构建安装包，并由
