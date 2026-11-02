@@ -3,14 +3,30 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b0d12" />
   <title>BiliMuse · 收藏夹音乐库</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <div class="logo">♪</div>
+        <div class="logo">
+          <svg viewBox="0 0 108 108" aria-hidden="true">
+            <circle cx="54" cy="54" r="31.5" fill="#0B0D12" />
+            <circle cx="54" cy="54" r="27" fill="none" stroke="#FFFFFF" stroke-opacity="0.09" stroke-width="0.65" />
+            <circle cx="54" cy="54" r="23.6" fill="none" stroke="#FFFFFF" stroke-opacity="0.09" stroke-width="0.65" />
+            <g transform="translate(-0.5 1)" fill="#F5F7FF">
+              <ellipse cx="43.5" cy="66" rx="9.4" ry="7.1" transform="rotate(-20 43.5 66)" />
+              <ellipse cx="64" cy="62" rx="9.4" ry="7.1" transform="rotate(-20 64 62)" />
+              <rect x="48.4" y="34" width="5.2" height="32" rx="2.6" />
+              <rect x="69" y="30.2" width="5.2" height="32" rx="2.6" />
+              <path d="M48.4 34 L74.2 30.2 L74.2 37 L48.4 40.8 Z" />
+            </g>
+          </svg>
+        </div>
         <div>
           <h1>BiliMuse</h1>
           <p>把收藏夹变成歌单</p>
@@ -26,7 +42,10 @@
         <button class="ghost" id="login-btn">登录</button>
       </div>
 
-      <div class="section-title">收藏夹<span id="folder-count"></span></div>
+      <div class="section-title">
+        <span class="section-heading">收藏夹<span id="folder-count"></span></span>
+        <button class="section-action" id="manage-folders" title="选择显示哪些收藏夹">管理</button>
+      </div>
       <nav class="folders" id="folders">
         <div class="skeleton"></div>
         <div class="skeleton"></div>
@@ -34,31 +53,19 @@
 
       <div class="spacer"></div>
 
-      <div class="panel">
-        <div class="panel-row">
-          <div>
-            <div class="panel-label">BTR 多线程</div>
-            <div class="muted small">多连接 / 多 CDN 分段拉流</div>
-          </div>
-          <label class="switch">
-            <input type="checkbox" id="btr-toggle" checked />
-            <span></span>
-          </label>
-        </div>
-        <div class="panel-row">
-          <span class="panel-label">并发数</span>
-          <select id="concurrency">
-            <option value="2">2</option>
-            <option value="4">4</option>
-            <option value="8" selected>8</option>
-            <option value="12">12</option>
-            <option value="16">16</option>
-            <option value="24">24</option>
-            <option value="32">32</option>
-          </select>
-        </div>
-        <div class="hint" id="engine-hint">引擎待连接</div>
-      </div>
+      <button class="settings-entry" id="open-settings" title="打开设置">
+        <span class="settings-entry-icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z" />
+            <path d="M19.4 13.5c.04-.5.04-1 0-1.5l1.7-1.33a.8.8 0 0 0 .19-1.02l-1.62-2.8a.8.8 0 0 0-.97-.35l-2 .8a7.8 7.8 0 0 0-1.3-.75l-.3-2.13a.8.8 0 0 0-.8-.68h-3.23a.8.8 0 0 0-.8.68l-.3 2.13c-.46.2-.9.46-1.3.75l-2-.8a.8.8 0 0 0-.97.35l-1.62 2.8a.8.8 0 0 0 .19 1.02l1.7 1.33a7.9 7.9 0 0 0 0 1.5l-1.7 1.33a.8.8 0 0 0-.19 1.02l1.62 2.8c.2.35.61.5.97.35l2-.8c.4.3.84.55 1.3.75l.3 2.13c.06.39.4.68.8.68h3.23c.4 0 .74-.29.8-.68l.3-2.13c.46-.2.9-.46 1.3-.75l2 .8c.36.15.77 0 .97-.35l1.62-2.8a.8.8 0 0 0-.19-1.02l-1.7-1.33Z" />
+          </svg>
+        </span>
+        <span class="settings-entry-copy">
+          <span class="settings-entry-title">设置</span>
+          <span class="settings-entry-summary" id="engine-summary">BTR 多线程 · 8 并发</span>
+        </span>
+        <span class="settings-entry-chevron">›</span>
+      </button>
     </aside>
 
     <main class="main">
@@ -67,8 +74,16 @@
           <h2 id="folder-title">选择一个收藏夹</h2>
           <p class="muted" id="folder-meta">登录后这里会列出你的收藏夹</p>
         </div>
-        <div class="search">
-          <input id="search" placeholder="在收藏夹内搜索…" autocomplete="off" />
+        <div class="top-actions">
+          <div class="search">
+            <input id="search" placeholder="在收藏夹内搜索…" autocomplete="off" />
+          </div>
+          <button class="icon-btn" id="settings-btn" title="设置" aria-label="打开设置">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z" />
+              <path d="M19.4 13.5c.04-.5.04-1 0-1.5l1.7-1.33a.8.8 0 0 0 .19-1.02l-1.62-2.8a.8.8 0 0 0-.97-.35l-2 .8a7.8 7.8 0 0 0-1.3-.75l-.3-2.13a.8.8 0 0 0-.8-.68h-3.23a.8.8 0 0 0-.8.68l-.3 2.13c-.46.2-.9.46-1.3.75l-2-.8a.8.8 0 0 0-.97.35l-1.62 2.8a.8.8 0 0 0 .19 1.02l1.7 1.33a7.9 7.9 0 0 0 0 1.5l-1.7 1.33a.8.8 0 0 0-.19 1.02l1.62 2.8c.2.35.61.5.97.35l2-.8c.4.3.84.55 1.3.75l.3 2.13c.06.39.4.68.8.68h3.23c.4 0 .74-.29.8-.68l.3-2.13c.46-.2.9-.46 1.3-.75l2 .8c.36.15.77 0 .97-.35l1.62-2.8a.8.8 0 0 0-.19-1.02l-1.7-1.33Z" />
+            </svg>
+          </button>
         </div>
       </header>
 
@@ -80,6 +95,7 @@
       <div id="empty" class="empty hidden">
         <div class="empty-icon">🎧</div>
         <p id="empty-text">还没有内容</p>
+        <button class="ghost hidden" id="empty-manage">管理收藏夹</button>
       </div>
     </main>
   </div>
@@ -121,6 +137,315 @@
       </div>
     </div>
   </footer>
+
+  <div class="settings-modal hidden" id="settings-modal">
+    <div class="settings-window" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <aside class="settings-rail">
+        <div class="settings-brand">
+          <div class="settings-brand-mark">♪</div>
+          <div>
+            <strong>BiliMuse</strong>
+            <span>桌面偏好设置</span>
+          </div>
+        </div>
+
+        <nav class="settings-nav" aria-label="设置分类">
+          <button class="settings-nav-item active" data-settings-tab="playback">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 18V5l11-2v13" />
+              <circle cx="6" cy="18" r="3" />
+              <circle cx="17" cy="16" r="3" />
+            </svg>
+            <span>播放与音质</span>
+          </button>
+          <button class="settings-nav-item" data-settings-tab="engine">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M13 2 4.5 13H11l-1 9 8.5-11H12l1-9Z" />
+            </svg>
+            <span>播放引擎</span>
+          </button>
+          <button class="settings-nav-item" data-settings-tab="folders">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3.5 7.5A2.5 2.5 0 0 1 6 5h3.2l1.9 2H18a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 19H6a2.5 2.5 0 0 1-2.5-2.5v-9Z" />
+            </svg>
+            <span>收藏夹</span>
+          </button>
+          <button class="settings-nav-item" data-settings-tab="account">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4.5 20c.8-3.7 3.6-5.5 7.5-5.5s6.7 1.8 7.5 5.5" />
+            </svg>
+            <span>账号</span>
+          </button>
+          <button class="settings-nav-item" data-settings-tab="about">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 10.7V17M12 7.4v.1" />
+            </svg>
+            <span>关于</span>
+          </button>
+        </nav>
+
+        <div class="settings-rail-foot">
+          <span class="rail-status"><i></i><span id="settings-rail-status">本地引擎已连接</span></span>
+          <span>v<span id="settings-version">0.2.2</span> · <span id="settings-runtime-mode">桌面版</span></span>
+        </div>
+      </aside>
+
+      <section class="settings-content">
+        <header class="settings-header">
+          <div>
+            <h2 id="settings-title">播放与音质</h2>
+            <p id="settings-subtitle">调整音轨选择与播放器的默认行为</p>
+          </div>
+          <button class="settings-close" id="close-settings" aria-label="关闭设置">✕</button>
+        </header>
+
+        <div class="settings-scroll">
+          <!-- 播放与音质 -->
+          <section class="settings-pane active" data-settings-pane="playback">
+            <div class="settings-group">
+              <div class="settings-group-head">
+                <h3>音频</h3>
+                <span>对下一首生效</span>
+              </div>
+              <div class="settings-card">
+                <div class="setting-row">
+                  <div class="setting-copy">
+                    <div class="setting-title">无损优先</div>
+                    <div class="setting-desc">优先选择 Hi-Res 或杜比音轨，没有时自动回退到最高码率 AAC。</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="prefer-lossless" checked />
+                    <span></span>
+                  </label>
+                </div>
+                <div class="setting-row setting-row-stack">
+                  <div class="setting-range-head">
+                    <div>
+                      <div class="setting-title">默认音量</div>
+                      <div class="setting-desc">启动播放器时使用的音量，也会同步更新底部音量条。</div>
+                    </div>
+                    <span class="setting-value" id="settings-volume-value">90%</span>
+                  </div>
+                  <input class="settings-range" id="settings-volume" type="range" min="0" max="1" step="0.01" value="0.9" />
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-group-head">
+                <h3>播放行为</h3>
+                <span>仅保存在本机</span>
+              </div>
+              <div class="settings-card">
+                <div class="setting-row">
+                  <div class="setting-copy">
+                    <div class="setting-title">自动播放下一首</div>
+                    <div class="setting-desc">当前曲目结束后，按当前列表或随机队列继续播放。</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="autoplay-next" checked />
+                    <span></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-tip">
+              <span class="settings-tip-icon">♫</span>
+              <p>音质由 B 站接口实际返回的音轨决定；拿不到无损时会无感回退，不会影响播放。</p>
+            </div>
+          </section>
+
+          <!-- 播放引擎 -->
+          <section class="settings-pane" data-settings-pane="engine">
+            <div class="settings-group">
+              <div class="settings-group-head">
+                <h3>BTR 流式加速</h3>
+                <span>实时生效</span>
+              </div>
+              <div class="settings-card">
+                <div class="setting-row">
+                  <div class="setting-copy">
+                    <div class="setting-title">BTR 多线程</div>
+                    <div class="setting-desc">多连接、多 CDN 分段拉流；关闭后使用单连接直通。</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="btr-toggle" checked />
+                    <span></span>
+                  </label>
+                </div>
+
+                <div class="setting-block" id="btr-options">
+                  <div class="setting-block-head">
+                    <div class="setting-title">并发连接数</div>
+                    <div class="setting-desc">线路较快时会自动收敛；遇到慢块再逐步拉满。</div>
+                  </div>
+                  <div class="segmented" id="settings-concurrency" role="group" aria-label="并发连接数">
+                    <button type="button" data-value="2">2</button>
+                    <button type="button" data-value="4">4</button>
+                    <button type="button" data-value="8">8</button>
+                    <button type="button" data-value="12">12</button>
+                    <button type="button" data-value="16">16</button>
+                    <button type="button" data-value="24">24</button>
+                    <button type="button" data-value="32">32</button>
+                  </div>
+                </div>
+
+                <div class="setting-block" id="btr-chunk-options">
+                  <div class="setting-block-head">
+                    <div class="setting-title">分块大小</div>
+                    <div class="setting-desc">较大的块吞吐更稳，较小的块首播响应更快。</div>
+                  </div>
+                  <div class="segmented segmented-wide" id="settings-chunk-size" role="group" aria-label="分块大小">
+                    <button type="button" data-value="262144">256 KB</button>
+                    <button type="button" data-value="524288">512 KB</button>
+                    <button type="button" data-value="1048576">1 MB</button>
+                    <button type="button" data-value="2097152">2 MB</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="engine-status-card" id="engine-status-card">
+              <span class="engine-status-dot"></span>
+              <div>
+                <div class="engine-status-title" id="engine-hint">BTR 已开启 · 8 并发 · 512 KB/块</div>
+                <div class="engine-status-desc">设置会立即同步到已解析的音轨，无需重新登录。</div>
+              </div>
+            </div>
+
+            <div class="settings-tip">
+              <span class="settings-tip-icon">⚡</span>
+              <p>默认 8 并发 + 512 KB 适合大多数家庭网络；网络不稳定时可先降到 4 并发。</p>
+            </div>
+          </section>
+
+          <!-- 收藏夹 -->
+          <section class="settings-pane" data-settings-pane="folders">
+            <div class="settings-group">
+              <div class="settings-group-head">
+                <h3>显示的收藏夹</h3>
+                <span id="folder-visibility-summary">登录后可管理</span>
+              </div>
+              <div class="settings-card" id="folder-visibility-list">
+                <div class="settings-empty">正在读取收藏夹…</div>
+              </div>
+              <button class="ghost folder-show-all hidden" id="show-all-folders">全部显示</button>
+            </div>
+
+            <div class="settings-tip">
+              <span class="settings-tip-icon">👁</span>
+              <p>隐藏只影响本机的收藏夹列表，不会取消 B 站收藏；新收藏的收藏夹默认显示。</p>
+            </div>
+          </section>
+
+          <!-- 账号 -->
+          <section class="settings-pane" data-settings-pane="account">
+            <div class="settings-group">
+              <div class="settings-group-head">
+                <h3>当前账号</h3>
+              </div>
+              <div class="settings-card">
+                <div class="account-preview">
+                  <div class="settings-avatar" id="settings-avatar">B</div>
+                  <div class="account-preview-copy">
+                    <div class="account-preview-name" id="settings-account-name">未登录</div>
+                    <div class="account-preview-hint" id="settings-account-hint">登录后读取你的 B 站收藏夹</div>
+                  </div>
+                  <span class="account-badge" id="settings-account-badge">未登录</span>
+                </div>
+                <div class="settings-actions">
+                  <button class="primary-btn" id="settings-account-login">登录 B 站账号</button>
+                  <button class="ghost danger hidden" id="settings-account-logout">退出登录</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-group-head">
+                <h3>登录方式</h3>
+              </div>
+              <div class="settings-card">
+                <div class="setting-row">
+                  <div class="setting-copy">
+                    <div class="setting-title">扫码登录</div>
+                    <div class="setting-desc">使用 B 站手机客户端扫码，网页版与桌面版均可用。</div>
+                  </div>
+                  <span class="method-tag">二维码</span>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-copy">
+                    <div class="setting-title">官方窗口登录</div>
+                    <div class="setting-desc">账号密码或短信验证码在 B 站官方页面完成，本应用不接触密码。</div>
+                  </div>
+                  <span class="method-tag" id="settings-desktop-login-tag">桌面版可用</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-tip">
+              <span class="settings-tip-icon">🔒</span>
+              <p>登录态只保存在本机配置目录中（权限 0600），不会上传到任何第三方服务器。</p>
+            </div>
+          </section>
+
+          <!-- 关于 -->
+          <section class="settings-pane" data-settings-pane="about">
+            <div class="about-hero">
+              <div class="about-mark">♪</div>
+              <div class="about-hero-copy">
+                <h3>BiliMuse</h3>
+                <p>把收藏夹变成歌单 · 本地播放器</p>
+              </div>
+              <span class="about-version">v<span id="settings-version-inline">0.2.2</span></span>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-group-head">
+                <h3>运行信息</h3>
+              </div>
+              <div class="settings-card info-card">
+                <div class="info-row">
+                  <span>运行方式</span>
+                  <strong id="settings-runtime-mode-inline">桌面版</strong>
+                </div>
+                <div class="info-row">
+                  <span>播放引擎</span>
+                  <strong id="settings-engine-mode-inline">BTR 多线程</strong>
+                </div>
+                <div class="info-row">
+                  <span>更新方式</span>
+                  <strong>GitHub Releases 自动更新</strong>
+                </div>
+                <div class="info-row">
+                  <span>日志位置</span>
+                  <code>~/.cache/bilimuse/desktop.log</code>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-group-head">
+                <h3>键盘快捷键</h3>
+              </div>
+              <div class="settings-card shortcut-card">
+                <div class="shortcut-row"><span>播放 / 暂停</span><kbd>Space</kbd></div>
+                <div class="shortcut-row"><span>上一首 / 下一首</span><span><kbd>P</kbd><kbd>N</kbd></span></div>
+                <div class="shortcut-row"><span>快退 / 快进 5 秒</span><span><kbd>←</kbd><kbd>→</kbd></span></div>
+                <div class="shortcut-row"><span>随机播放</span><kbd>S</kbd></div>
+              </div>
+            </div>
+
+            <p class="settings-disclaimer">音频来自 B 站公开接口，仅用于在线收听本人账号收藏的内容。请遵守 B 站用户协议。</p>
+          </section>
+        </div>
+
+        <div class="settings-toast" id="settings-toast">设置已保存</div>
+      </section>
+    </div>
+  </div>
 
   <div class="modal hidden" id="login-modal">
     <div class="modal-card">

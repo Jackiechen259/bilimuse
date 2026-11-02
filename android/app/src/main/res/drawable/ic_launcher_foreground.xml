@@ -1,28 +1,79 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标前景：与 assets/branding/bilimuse-icon.svg 共用 108×108 坐标。
+  整体缩放 2/3 是为了适配自适应图标 72dp 的可见安全区，
+  这样在启动器里看到的唱片/音符比例与桌面版一致。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 背后的暗色圆盘，让图标在浅色启动器上也有轮廓 -->
-    <path
-        android:fillColor="#141826"
-        android:pathData="M54,54m-31,0a31,31 0 1,0 62,0a31,31 0 1,0 -62,0" />
-    <path
-        android:fillColor="#1B2030"
-        android:pathData="M54,54m-23,0a23,23 0 1,0 46,0a23,23 0 1,0 -46,0" />
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.6667"
+        android:scaleY="0.6667">
 
-    <!-- 八分音符：符杆、符尾、符头 -->
-    <path
-        android:pathData="M64,32 L64,66"
-        android:strokeColor="#FB7299"
-        android:strokeWidth="6"
-        android:strokeLineCap="round" />
-    <path
-        android:fillColor="#00AEEC"
-        android:pathData="M64,33 C73,37 77,45 74,55 C72,48 69,44 64,42 Z" />
-    <path
-        android:fillColor="#FB7299"
-        android:pathData="M50,70 a14,10 0 1,0 28,0 a14,10 0 1,0 -28,0" />
+        <!-- 黑胶唱片 -->
+        <path android:pathData="M54,54 m-31.5,0 a31.5,31.5 0 1,0 63,0 a31.5,31.5 0 1,0 -63,0">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="54"
+                    android:startY="22.5"
+                    android:endX="54"
+                    android:endY="85.5"
+                    android:startColor="#14192A"
+                    android:endColor="#06080E" />
+            </aapt:attr>
+        </path>
+
+        <!-- 唱片纹路 -->
+        <path
+            android:pathData="M54,54 m-27,0 a27,27 0 1,0 54,0 a27,27 0 1,0 -54,0"
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFF"
+            android:strokeAlpha="0.09"
+            android:strokeWidth="0.65" />
+        <path
+            android:pathData="M54,54 m-23.6,0 a23.6,23.6 0 1,0 47.2,0 a23.6,23.6 0 1,0 -47.2,0"
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFF"
+            android:strokeAlpha="0.09"
+            android:strokeWidth="0.65" />
+
+        <!-- 连杠八分音符 -->
+        <group
+            android:translateX="-0.5"
+            android:translateY="1">
+            <group
+                android:pivotX="43.5"
+                android:pivotY="66"
+                android:rotation="-20">
+                <path
+                    android:pathData="M34.1,66 a9.4,7.1 0 1,0 18.8,0 a9.4,7.1 0 1,0 -18.8,0"
+                    android:fillColor="#F5F7FF" />
+            </group>
+            <group
+                android:pivotX="64"
+                android:pivotY="62"
+                android:rotation="-20">
+                <path
+                    android:pathData="M54.6,62 a9.4,7.1 0 1,0 18.8,0 a9.4,7.1 0 1,0 -18.8,0"
+                    android:fillColor="#F5F7FF" />
+            </group>
+            <path
+                android:pathData="M48.4,36.6 a2.6,2.6 0 0 1 5.2,0 v26.8 a2.6,2.6 0 0 1 -5.2,0 z"
+                android:fillColor="#F5F7FF" />
+            <path
+                android:pathData="M69,32.8 a2.6,2.6 0 0 1 5.2,0 v26.8 a2.6,2.6 0 0 1 -5.2,0 z"
+                android:fillColor="#F5F7FF" />
+            <path
+                android:pathData="M48.4,34 L74.2,30.2 L74.2,37 L48.4,40.8 Z"
+                android:fillColor="#F5F7FF" />
+        </group>
+    </group>
 </vector>

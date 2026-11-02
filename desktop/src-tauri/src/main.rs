@@ -266,9 +266,15 @@ fn terminate(child: &mut Child) {
     }
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
         let pid = child.id().to_string();
+        // taskkill 是控制台程序。桌面壳本身是 Windows GUI 进程，
+        // 不隐藏窗口的话，退出时会闪出一个 cmd 黑框。
         let _ = Command::new("taskkill")
             .args(["/F", "/T", "/PID", &pid])
+            .creation_flags(CREATE_NO_WINDOW)
             .output();
     }
     let _ = child.kill();

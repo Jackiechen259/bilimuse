@@ -20,6 +20,10 @@ _MIXIN_KEY_TAB = [
     36, 20, 34, 44,
 ]
 
+# 收藏夹列表接口的 ps 上限：B 站对 ps > 40 直接回 -400「请求错误」，
+# 和是否登录无关，所以这里统一兜底，避免调用方传入过大的分页。
+FAV_MAX_PAGE_SIZE = 40
+
 # dash 中音频流的 id -> 中文说明
 AUDIO_QUALITY = {
     30216: "64K",
@@ -264,6 +268,8 @@ class BiliClient:
     async def folder_items(
         self, media_id: int, page: int = 1, size: int = 20, keyword: str = ""
     ) -> dict[str, Any]:
+        # B 站对 ps > 40 返回 -400，这里再兜一层，防止调用方绕过校验
+        size = max(1, min(int(size), FAV_MAX_PAGE_SIZE))
         params: dict[str, Any] = {
             "media_id": media_id,
             "pn": page,

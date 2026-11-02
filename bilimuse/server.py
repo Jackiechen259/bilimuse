@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import auth, demo
-from .api import BiliClient, BiliError, NotLoggedIn, pick_audio
+from .api import BiliClient, BiliError, FAV_MAX_PAGE_SIZE, NotLoggedIn, pick_audio
 from .btr import BTRStream, SimpleStream, StreamError, build_stream
 from .config import CACHE_DIR, REFERER, UA, VERSION, WEB_DIR, settings
 
@@ -205,12 +205,7 @@ async def api_state() -> dict[str, Any]:
         "demo": state.demo_mode,
         "desktop": state.desktop_shell,
         "user": user,
-        "settings": {
-            "btr_enabled": settings.btr_enabled,
-            "concurrency": settings.concurrency,
-            "chunk_size": settings.chunk_size,
-            "prefer_lossless": settings.prefer_lossless,
-        },
+        "settings": settings.public(),
     }
 
 
@@ -417,7 +412,8 @@ async def api_logout() -> dict[str, Any]:
 # ------------------------------------------------------------------ 收藏夹
 
 # 随机播放整个收藏夹时，一次把分页全部拉完。
-FULL_PAGE_SIZE = 50
+# 注意 ps 不能超过 FAV_MAX_PAGE_SIZE（40），否则 B 站直接返回 -400。
+FULL_PAGE_SIZE = FAV_MAX_PAGE_SIZE
 FULL_MAX_PAGES = 200
 FULL_MAX_EMPTY_PAGES = 3
 FULL_PAGE_GAP = 0.1
@@ -514,6 +510,7 @@ async def api_folder_all(fid: int, keyword: str = "") -> dict[str, Any]:
 async def api_folder(
     fid: int,
     pn: int = Query(1, ge=1),
+    # 上限仍放行到 50，兼容可能被缓存的旧前端；api.folder_items 会统一压到 40
     ps: int = Query(30, ge=1, le=50),
     keyword: str = "",
 ) -> dict[str, Any]:
@@ -708,16 +705,14 @@ class SettingsPatch(BaseModel):
     concurrency: int | None = None
     chunk_size: int | None = None
     prefer_lossless: bool | None = None
+    volume: float | None = None
+    autoplay_next: bool | None = None
+    hidden_folders: list[int] | None = None
 
 
 @app.get("/api/settings")
 async def api_get_settings() -> dict[str, Any]:
-    return {
-        "btr_enabled": settings.btr_enabled,
-        "concurrency": settings.concurrency,
-        "chunk_size": settings.chunk_size,
-        "prefer_lossless": settings.prefer_lossless,
-    }
+    return settings.public()
 
 
 @app.post("/api/settings")
@@ -730,7 +725,14 @@ async def api_set_settings(patch: SettingsPatch) -> dict[str, Any]:
         settings.chunk_size = patch.chunk_size
     if patch.prefer_lossless is not None:
         settings.prefer_lossless = patch.prefer_lossless
+    if patch.volume is not None:
+        settings.volume = patch.volume
+    if patch.autoplay_next is not None:
+        settings.autoplay_next = patch.autoplay_next
+    if patch.hidden_folders is not None:
+        settings.hidden_folders = patch.hidden_folders
     settings.clamp()
+    settings.save()
     # 已解析的音轨也立刻套用新并发
     for track in state.tracks.values():
         if isinstance(track.stream, BTRStream):
@@ -793,6 +795,16 @@ async def app_js() -> FileResponse:
 @app.get("/style.css")
 async def style_css() -> FileResponse:
     return FileResponse(WEB_DIR / "style.css", media_type="text/css")
+
+
+@app.get("/favicon.svg")
+async def favicon_svg() -> FileResponse:
+    return FileResponse(WEB_DIR / "favicon.svg", media_type="image/svg+xml")
+
+
+@app.get("/favicon.ico")
+async def favicon_ico() -> FileResponse:
+    return FileResponse(WEB_DIR / "favicon.ico", media_type="image/x-icon")
 
 
 def runtime_info() -> dict[str, str]:

@@ -6,6 +6,8 @@ import httpx
 import pytest
 
 from bilimuse import server
+from bilimuse.api import BiliClient, FAV_MAX_PAGE_SIZE
+from bilimuse.auth import Session
 from bilimuse.config import CACHE_DIR
 from bilimuse.server import load_all_folder_items, parse_range
 from mock_cdn import serve
@@ -72,6 +74,11 @@ def test_demo_folder(api):
     assert data["total"] == 3
     assert data["items"][0]["bvid"].startswith("DEMO")
 
+    # 旧前端缓存可能还在传 ps=50：端点要兼容（API 层会压到 40），不能直接 422
+    legacy = api.get("/api/folder/-1", params={"ps": 50})
+    assert legacy.status_code == 200
+    assert legacy.json()["total"] == 3
+
 
 def test_full_playback_chain(api):
     info = api.post("/api/track", json={"bvid": "DEMO0001", "title": "夜航星"}).json()
@@ -116,11 +123,36 @@ def test_unknown_track_404(api):
 
 
 def test_settings_roundtrip(api):
-    resp = api.post("/api/settings", json={"concurrency": 16, "btr_enabled": True})
-    assert resp.json()["concurrency"] == 16
-    resp = api.post("/api/settings", json={"concurrency": 999})
-    assert resp.json()["concurrency"] <= 64
-    api.post("/api/settings", json={"concurrency": 8})
+    resp = api.post(
+        "/api/settings",
+        json={
+            "concurrency": 16,
+            "btr_enabled": True,
+            "volume": 0.55,
+            "autoplay_next": False,
+            "hidden_folders": [7, 3, 7],
+        },
+    )
+    data = resp.json()
+    assert data["concurrency"] == 16
+    assert data["volume"] == 0.55
+    assert data["autoplay_next"] is False
+    assert data["hidden_folders"] == [3, 7]
+    # /api/state 也给前端带同一份显示设置
+    assert api.get("/api/state").json()["settings"]["hidden_folders"] == [3, 7]
+    resp = api.post("/api/settings", json={"concurrency": 999, "volume": 2})
+    data = resp.json()
+    assert data["concurrency"] <= 64
+    assert data["volume"] == 1.0
+    api.post(
+        "/api/settings",
+        json={
+            "concurrency": 8,
+            "volume": 0.9,
+            "autoplay_next": True,
+            "hidden_folders": [],
+        },
+    )
 
 
 def test_demo_folder_all(api):
@@ -145,7 +177,7 @@ async def test_load_all_folder_items_deduplicates_and_stops():
 
     assert [i["bvid"] for i in data["items"]] == ["a", "b", "c"]
     assert data["total"] == 4
-    assert fake.calls == [(42, 1, 50, ""), (42, 2, 50, "")]
+    assert fake.calls == [(42, 1, 40, ""), (42, 2, 40, "")]
 
 
 async def test_load_all_folder_items_skips_filtered_empty_pages():
@@ -218,4 +250,44 @@ async def test_load_all_folder_items_ignores_folder_total_for_search():
     data = await load_all_folder_items(fake, 1, keyword="live", page_gap=0)
 
     assert data["total"] == 1
-    assert fake.calls == [(1, 1, 50, "live")]
+    assert fake.calls == [(1, 1, 40, "live")]
+
+
+async def test_folder_items_caps_ps_at_bilibili_limit():
+    """B 站对 ps > 40 返回 -400「请求错误」，API 层必须自己把分页压回上限。"""
+    seen: dict[str, str] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen["ps"] = request.url.params["ps"]
+        return httpx.Response(
+            200,
+            json={"code": 0, "data": {"medias": [], "has_more": False}},
+        )
+
+    client = BiliClient(Session(cookies={"SESSDATA": "x"}, mid=42))
+    await client.http.aclose()
+    client.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        await client.folder_items(1, page=1, size=50)
+    finally:
+        await client.close()
+
+    assert FAV_MAX_PAGE_SIZE == 40
+    assert server.FULL_PAGE_SIZE <= FAV_MAX_PAGE_SIZE
+    assert seen["ps"] == str(FAV_MAX_PAGE_SIZE)
+
+
+def test_settings_hidden_folders_persist(tmp_path, monkeypatch):
+    """settings.json 里保存的隐藏收藏夹要能跨进程恢复，并去重排序。"""
+    from bilimuse import config as config_module
+
+    monkeypatch.setattr(config_module, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_module, "SETTINGS_FILE", tmp_path / "settings.json")
+
+    settings = config_module.Settings()
+    settings.hidden_folders = [5, 2, 5]
+    assert settings.save() is True
+
+    restored = config_module.Settings()
+    restored.load()
+    assert restored.hidden_folders == [2, 5]

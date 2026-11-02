@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 108 108" role="img" aria-label="BiliMuse 单色标志">
+  <!-- Android 13+ 主题图标用：只有轮廓，系统负责着色 -->
+  <circle cx="54" cy="54" r="31.5" fill="none" stroke="#FFFFFF" stroke-width="2.2"/>
+  <g transform="translate(-0.5 1)" fill="#FFFFFF">
+    <ellipse cx="43.5" cy="66" rx="9.4" ry="7.1" transform="rotate(-20 43.5 66)"/>
+    <ellipse cx="64" cy="62" rx="9.4" ry="7.1" transform="rotate(-20 64 62)"/>
+    <rect x="48.4" y="34" width="5.2" height="32" rx="2.6"/>
+    <rect x="69" y="30.2" width="5.2" height="32" rx="2.6"/>
+    <path d="M48.4 34 L74.2 30.2 L74.2 37 L48.4 40.8 Z"/>
+  </g>
+</svg>

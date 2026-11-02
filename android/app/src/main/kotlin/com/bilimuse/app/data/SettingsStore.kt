@@ -18,6 +18,7 @@ class SettingsStore(context: Context) {
             .putInt(KEY_CHUNK, next.chunkSize)
             .putBoolean(KEY_LOSSLESS, next.preferLossless)
             .putBoolean(KEY_SHOW_BTR_DETAILS, next.showBtrDetails)
+            .putStringSet(KEY_HIDDEN_FOLDERS, next.hiddenFolderIds.map { it.toString() }.toSet())
             .apply()
         _settings.value = next
         return next
@@ -35,12 +36,26 @@ class SettingsStore(context: Context) {
     fun setShowBtrDetails(enabled: Boolean): EngineSettings =
         update { it.copy(showBtrDetails = enabled) }
 
+    fun setFolderHidden(folderId: Long, hidden: Boolean): EngineSettings = update { settings ->
+        if (hidden) {
+            settings.copy(hiddenFolderIds = settings.hiddenFolderIds + folderId)
+        } else {
+            settings.copy(hiddenFolderIds = settings.hiddenFolderIds - folderId)
+        }
+    }
+
+    fun showAllFolders(): EngineSettings = update { it.copy(hiddenFolderIds = emptySet()) }
+
     private fun restore(): EngineSettings = EngineSettings(
         btrEnabled = prefs.getBoolean(KEY_BTR, true),
         concurrency = prefs.getInt(KEY_CONCURRENCY, 8),
         chunkSize = prefs.getInt(KEY_CHUNK, 512 * 1024),
         preferLossless = prefs.getBoolean(KEY_LOSSLESS, true),
         showBtrDetails = prefs.getBoolean(KEY_SHOW_BTR_DETAILS, true),
+        hiddenFolderIds = prefs.getStringSet(KEY_HIDDEN_FOLDERS, emptySet())
+            .orEmpty()
+            .mapNotNull { it.toLongOrNull() }
+            .toSet(),
     ).clamp()
 
     private companion object {
@@ -50,5 +65,6 @@ class SettingsStore(context: Context) {
         const val KEY_CHUNK = "chunk_size"
         const val KEY_LOSSLESS = "prefer_lossless"
         const val KEY_SHOW_BTR_DETAILS = "show_btr_details"
+        const val KEY_HIDDEN_FOLDERS = "hidden_folders"
     }
 }

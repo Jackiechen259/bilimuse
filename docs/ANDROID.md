@@ -26,7 +26,7 @@
 │         │                                                            │
 │  PlayerController（MediaController）                                  │
 │         │                                                            │
-│  PlaybackService（MediaSessionService，前台服务）                      │
+│  PlaybackService（MediaLibraryService，前台服务）                      │
 │         │                                                            │
 │  ExoPlayer ──→ BtrDataSource ──→ StreamRegistry ──→ BTR 引擎          │
 │                                                   │                  │
@@ -68,12 +68,13 @@ android/
 │   │   ├── Wbi.kt             # WBI 签名（与 Python 实现逐字节一致）
 │   │   ├── BiliClient.kt      # 扫码登录 / 收藏夹 / playurl / 音轨选择
 │   │   ├── SessionStore.kt    # 登录态持久化
-│   │   ├── SettingsStore.kt   # BTR 设置持久化
+│   │   ├── SettingsStore.kt   # BTR / 收藏夹显示设置持久化
 │   │   ├── DemoCdn.kt         # 演示模式：合成 WAV + 限速 Interceptor
 │   │   ├── StreamRegistry.kt  # 30 分钟 / 48 条音轨缓存，懒解析
 │   │   └── update/            # GitHub Releases 自动更新（检查/下载/校验/安装）
 │   ├── player/
-│   │   ├── PlaybackService.kt # MediaSessionService + ExoPlayer
+│   │   ├── PlaybackService.kt # MediaLibraryService + ExoPlayer
+│   │   ├── AutoLibrary.kt     # Android Auto 收藏夹媒体库树 + 分页
 │   │   ├── PlayerController.kt# UI ↔ MediaController 桥
 │   │   └── BtrDataSource.kt   # Media3 DataSource
 │   ├── ui/                    # Compose 界面、主题、登录/设置/更新弹层
@@ -113,7 +114,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:assembleRelease
 
 # 本地模拟 CI 的发布版本号（自动更新比较的就是 versionName）
-./gradlew :app:assembleRelease -PbilimuseVersionName=0.2.1 -PbilimuseVersionCode=201
+./gradlew :app:assembleRelease -PbilimuseVersionName=0.2.2 -PbilimuseVersionCode=202
 ```
 
 第一次构建会下载 Compose、Media3、OkHttp、Coil、ZXing 等依赖，约 1–3 分钟。
@@ -129,6 +130,60 @@ CI 或没有 `~/.android/debug.keystore` 的环境也能直接构建：`app/buil
 `BILIMUSE_ANDROID_*` 签名环境变量时也会回退到这个公开密钥，这样 sideload 和自动更新
 链路开箱可用；但公开密钥意味着任何人都能伪造同包名 APK，**正式分发请配置自己的
 签名**（见下面「自动更新」里的签名说明）。
+
+## Android Auto（车机）
+
+安卓版通过 Media3 的 `MediaLibraryService` 向 Android Auto 暴露一个媒体库树：
+
+```
+Android Auto                         PlaybackService
+    │                                      │
+    ├─ 浏览根节点 ────────────────────────→ 收藏夹列表
+    ├─ 打开收藏夹 ────────────────────────→ 收藏夹内稿件（固定 B站分页缓存按窗口切片）
+    └─ 选择稿件 ──────────────────────────→ MediaItem(mediaId=bvid, bilimuse://track/{bvid})
+                                                │
+                                                ▼
+                                     ExoPlayer + BtrDataSource + BTR
+```
+
+车机端当前支持：
+
+- 根菜单 → 账号下显示中的收藏夹（按本机隐藏设置过滤）→ 收藏夹内的稿件；
+- 点击稿件播放，交给现有 `MediaSession` 队列，手机端播放状态会同步；
+- 车机/方向盘上的播放、暂停、上一首、下一首、拖动进度继续沿用 MediaSession；
+- 媒体项包含标题、UP 主、封面和时长；`AutoLibraryDataSource` 用固定大小 B站分页缓存，
+  再按 `onGetChildren(page, pageSize)` 的窗口切片，避免两端 pageSize 不一致导致跳条目。
+
+实现入口：
+
+- `PlaybackService` 从 `MediaSessionService` 改为 `MediaLibraryService`，实现
+  `onGetLibraryRoot` / `onGetItem` / `onGetChildren`，并用 `SettableFuture` 把挂起函数桥接给 Media3；
+- `AutoLibrary.kt` 负责媒体 ID、根节点/收藏夹/播放项映射和短期缓存；
+- `AndroidManifest.xml` 增加 `com.google.android.gms.car.application` 元数据和
+  `android.media.browse.MediaBrowserService` intent-filter；
+- `res/xml/automotive_app_desc.xml` 声明 `<uses name="media" />`。
+
+使用前注意：
+
+- **必须先在手机上的 BiliMuse 登录**；车机端不提供登录界面。未登录时根节点会提示先在手机上登录，且列表为空。
+- 当前只做媒体浏览和播放，不提供车机端搜索、收藏管理或登录；语音搜索尚未接入。
+- 这是 Android Auto 媒体应用接入，不是 Android Automotive OS 的原生车机 App。
+- 车机是否展示应用还受手机 Android Auto 版本、车辆主机和应用分发渠道影响。
+
+本地用 Desktop Head Unit（DHU）验证：
+
+```bash
+# 手机 Android Auto 设置中开启开发者模式并启动 Start head unit server
+adb forward tcp:5277 tcp:5277
+
+# DHU 位于 Android SDK extras 中；实际目录可能因 SDK 版本略有不同
+cd "$ANDROID_HOME/extras/google/auto/desktop-head-unit"
+./desktop-head-unit
+```
+
+DHU 启动后在媒体应用里应能看到 BiliMuse，选择收藏夹和稿件即可验证浏览与播放。
+当前开发环境没有可用的 Android Auto/DHU，因此该链路已通过编译和 JVM 单测验证，
+但尚未在真实车机上回归。
 
 ## 自动更新（GitHub Releases）
 
@@ -216,15 +271,15 @@ base64 -w0 bilimuse-release.jks   # macOS 用：base64 -i bilimuse-release.jks
 2. 打 tag 并推送：
 
    ```bash
-   git tag v0.2.1
-   git push origin v0.2.1
+   git tag v0.2.2
+   git push origin v0.2.2
    ```
 
 3. `.github/workflows/release.yml` 的 `android` job 会：
-   - 从 tag 解析 `versionName=0.2.1`、`versionCode=201`
+   - 从 tag 解析 `versionName=0.2.2`、`versionCode=202`
      （`major * 10000 + minor * 100 + patch`）；
    - 用 JDK 17 构建 `:app:assembleRelease`（有 Secrets 就用正式签名）；
-   - 把 APK 命名为 `BiliMuse-android-0.2.1.apk`，上传到同一个**草稿** Release。
+   - 把 APK 命名为 `BiliMuse-android-0.2.2.apk`，上传到同一个**草稿** Release。
 4. 打开 GitHub 的草稿 Release，确认 APK 已上传，再点 **Publish release**。只有发布后，
    应用内检查才能看到它。
 5. 已安装旧版本的设备在下次冷启动（或手动检查）时会看到更新。
@@ -252,6 +307,8 @@ APK 资产的选择规则：优先名字带 `universal` 的；其次没有 ABI �
 - 三种登录：原生扫码；账号密码 / 手机验证码（B 站官方登录页 + 极验人机验证）
 - 登录态只写应用私有目录；密码和短信验证码只在官方登录页内处理，App 不保存
 - 收藏夹列表、夹内搜索、分页加载（每页 30 条）
+- 收藏夹显示管理：设置 →「收藏夹」逐项开关，隐藏项不会出现在手机列表和 Android Auto 中；
+  只影响本机显示，不会取消 B 站收藏，新收藏夹默认显示
 - 点击播放、队列、上一首/下一首、拖动进度、随机、单曲循环/列表循环
 - 随机播放覆盖**整个收藏夹**：开启随机后会在后台把剩余分页全部拉下来，再补进播放队列，
   不再局限于列表已经加载过的内容；夹内搜索时同样覆盖全部搜索结果。播放页会显示
@@ -309,7 +366,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 
 ## 测试
 
-`./gradlew :app:testDebugUnitTest` 共 39 个 JVM 测试：
+`./gradlew :app:testDebugUnitTest` 共 41 个 JVM 测试：
 
 - **WbiTest**：mixin key、`w_rid`、中文/空格/特殊字符编码与 Python 实现一致
 - **BtrEngineTest**：
@@ -322,6 +379,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 - **CookieParsingTest**：WebView Cookie 头解析（值里带 `=`、空项、空白）
 - **FolderPagerTest**：整夹翻页（逐页请求、bvid 去重、空页/重复页/页数上限停止、进度回调）
   与随机队列去重
+- **AutoLibraryTest**：Android Auto 收藏夹 mediaId 的生成/解析，以及根节点等非收藏夹 ID 的拒绝
 - **UpdateModelsTest**：版本号解析/排序、预发布版优先级、通用/ABI APK 选择、Release → AppUpdate、草稿/预发布过滤
 - **GitHubReleaseApiTest**：MockWebServer 模拟 404、正常 Release、403 限流、坏 JSON，并检查请求路径与 `Accept` 头
 
@@ -330,7 +388,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 ## 已验证
 
 - `:app:assembleDebug` 成功，产物 `app-debug.apk` 约 14 MB
-- 39 个 JVM 测试全部通过
+- 41 个 JVM 测试全部通过
 - JVM 基准（1 MB 文件、每条连接 400 KB/s）：单连接 ~2.6 s，BTR 645 ms，**约 4.1x**
 - 真实 B 站二维码接口冒烟通过：生成 `account.bilibili.com` 扫码 URL，轮询返回 `pending`
 - Compose 界面在 Robolectric 中以 411×891 dp 真实渲染通过，截图见 `assets/android*.png`
@@ -342,7 +400,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 
 ## 已知限制
 
-- 开发机没有可用的 KVM，**尚未在真机/模拟器上做完整的扫码 → 播放回归**；目前已验证编译、39 个 JVM 测试、真实二维码接口和 Robolectric 界面渲染。第一次装到手机上建议先用「演示模式」确认播放链路
+- 开发机没有可用的 KVM，**尚未在真机/模拟器上做完整的扫码 → 播放回归**；目前已验证编译、41 个 JVM 测试、真实二维码接口和 Robolectric 界面渲染。第一次装到手机上建议先用「演示模式」确认播放链路
 - 自动更新需要 Release 已发布且包含 APK 资产；草稿 / Pre-release 不会被应用看到
 - Android 要求用户在系统安装器里确认，无法像桌面版那样静默安装；下载过程也不驻留后台服务
 - 自动更新的系统安装器、未知来源授权流程尚未在真机上回归（开发机没有可用 KVM）
@@ -354,6 +412,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 - 暂无离线缓存 / 歌单持久化；换设备不会同步
 - 演示音频首次生成约 12 MB，放在应用 cache 目录
 - 冷启动时 MediaSession 连接、音轨解析和 CDN 探测叠加，首播会比切歌慢
+- Android Auto 已接入媒体库协议，但当前环境没有 Android Auto/DHU/真车，车机端浏览和播放尚未实机回归；车机端也不支持登录和语音搜索
 - 默认不向公网暴露任何端口（安卓版根本没有本地服务端口）
 
 ## 故障排查

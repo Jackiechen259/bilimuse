@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 告诉 Android Auto：这是一个媒体类应用，通过 MediaBrowserService 提供内容。 -->
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>

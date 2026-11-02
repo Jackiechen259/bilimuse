@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 108 108" role="img" aria-label="BiliMuse">
+  <defs>
+    <linearGradient id="bm-tile" x1="0" y1="0" x2="108" y2="108" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FB7299"/>
+      <stop offset="0.5" stop-color="#A55EEA"/>
+      <stop offset="1" stop-color="#00AEEC"/>
+    </linearGradient>
+    <linearGradient id="bm-disc" x1="54" y1="22.5" x2="54" y2="85.5" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14192A"/>
+      <stop offset="1" stop-color="#06080E"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 唱片封套：B 站粉 → 紫 → 蓝 -->
+  <rect width="108" height="108" rx="24" fill="url(#bm-tile)"/>
+
+  <!-- 黑胶唱片 -->
+  <circle cx="54" cy="54" r="31.5" fill="url(#bm-disc)"/>
+  <circle cx="54" cy="54" r="27" fill="none" stroke="#FFFFFF" stroke-opacity="0.09" stroke-width="0.65"/>
+  <circle cx="54" cy="54" r="23.6" fill="none" stroke="#FFFFFF" stroke-opacity="0.09" stroke-width="0.65"/>
+
+  <!-- 连杠八分音符 -->
+  <g transform="translate(-0.5 1)">
+    <ellipse cx="43.5" cy="66" rx="9.4" ry="7.1" transform="rotate(-20 43.5 66)" fill="#F5F7FF"/>
+    <ellipse cx="64" cy="62" rx="9.4" ry="7.1" transform="rotate(-20 64 62)" fill="#F5F7FF"/>
+    <rect x="48.4" y="34" width="5.2" height="32" rx="2.6" fill="#F5F7FF"/>
+    <rect x="69" y="30.2" width="5.2" height="32" rx="2.6" fill="#F5F7FF"/>
+    <path d="M48.4 34 L74.2 30.2 L74.2 37 L48.4 40.8 Z" fill="#F5F7FF"/>
+  </g>
+</svg>

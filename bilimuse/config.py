@@ -6,13 +6,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 APP_NAME = "bilimuse"
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 
 
 def _default_config_dir() -> Path:
@@ -48,6 +49,7 @@ def _web_dir() -> Path:
 
 CONFIG_DIR = Path(os.environ.get("BILIMUSE_CONFIG_DIR") or _default_config_dir())
 SESSION_FILE = CONFIG_DIR / "session.json"
+SETTINGS_FILE = CONFIG_DIR / "settings.json"
 CACHE_DIR = Path(os.environ.get("BILIMUSE_CACHE_DIR") or _default_cache_dir())
 
 WEB_DIR = _web_dir()
@@ -78,7 +80,12 @@ def _env_bool(name: str, default: bool) -> bool:
 
 @dataclass
 class Settings:
-    """运行时设置，可通过 /api/settings 热更新（仅内存）。"""
+    """可热更新的运行设置，并持久化到配置目录。
+
+    环境变量仍然是初始默认值；用户在设置界面里改过的项会写到
+    ``CONFIG_DIR/settings.json``，下次启动继续生效。桌面版端口是随机的，
+    因此不能依赖浏览器 localStorage（localhost 的不同端口是不同 origin）。
+    """
 
     host: str = field(default_factory=lambda: os.environ.get("BILIMUSE_HOST", "127.0.0.1"))
     port: int = field(default_factory=lambda: _env_int("BILIMUSE_PORT", 8756))
@@ -93,9 +100,90 @@ class Settings:
     # 音质偏好：flac > dolby > 最高码率 m4a
     prefer_lossless: bool = True
 
+    # 播放器偏好
+    volume: float = 0.9
+    autoplay_next: bool = True
+
+    # 收藏夹显示：存被隐藏的收藏夹 ID，新收藏夹默认可见
+    hidden_folders: list[int] = field(default_factory=list)
+
     def clamp(self) -> None:
         self.concurrency = max(1, min(self.concurrency, 64))
         self.chunk_size = max(64 * 1024, min(self.chunk_size, 8 * 1024 * 1024))
+        self.volume = max(0.0, min(float(self.volume), 1.0))
+        self.hidden_folders = sorted(
+            {
+                int(fid)
+                for fid in self.hidden_folders
+                if isinstance(fid, int) and not isinstance(fid, bool)
+            }
+        )
+
+    def public(self) -> dict[str, object]:
+        """返回给前端设置页的可调项。"""
+        return {
+            "btr_enabled": self.btr_enabled,
+            "concurrency": self.concurrency,
+            "chunk_size": self.chunk_size,
+            "prefer_lossless": self.prefer_lossless,
+            "volume": round(self.volume, 2),
+            "autoplay_next": self.autoplay_next,
+            "hidden_folders": list(self.hidden_folders),
+        }
+
+    def load(self) -> None:
+        """从配置目录恢复界面设置；损坏或旧文件不影响启动。"""
+        try:
+            raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            self.clamp()
+            return
+        if not isinstance(raw, dict):
+            self.clamp()
+            return
+        if isinstance(raw.get("btr_enabled"), bool):
+            self.btr_enabled = raw["btr_enabled"]
+        for key, low, high in (
+            ("concurrency", 1, 64),
+            ("chunk_size", 64 * 1024, 8 * 1024 * 1024),
+        ):
+            value = raw.get(key)
+            if isinstance(value, (int, float)):
+                setattr(self, key, max(low, min(int(value), high)))
+        if isinstance(raw.get("prefer_lossless"), bool):
+            self.prefer_lossless = raw["prefer_lossless"]
+        if isinstance(raw.get("volume"), (int, float)):
+            self.volume = float(raw["volume"])
+        if isinstance(raw.get("autoplay_next"), bool):
+            self.autoplay_next = raw["autoplay_next"]
+        if isinstance(raw.get("hidden_folders"), list):
+            self.hidden_folders = [
+                fid
+                for fid in raw["hidden_folders"]
+                if isinstance(fid, int) and not isinstance(fid, bool)
+            ]
+        self.clamp()
+
+    def save(self) -> bool:
+        """原子写入设置文件（0600）。写入失败时仍保留本次运行时设置。"""
+        target = SETTINGS_FILE
+        tmp = target.with_name(f".{target.name}.tmp")
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(
+                json.dumps(self.public(), ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, target)
+            return True
+        except OSError:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return False
 
 
 settings = Settings()
+settings.load()

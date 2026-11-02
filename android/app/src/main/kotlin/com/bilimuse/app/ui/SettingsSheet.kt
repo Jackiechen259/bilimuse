@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.bilimuse.app.data.EngineSettings
+import com.bilimuse.app.data.Folder
 import com.bilimuse.app.data.UserInfo
 import com.bilimuse.app.data.update.UpdateStatus
 import com.bilimuse.app.data.update.UpdateUiState
@@ -58,6 +59,7 @@ fun SettingsSheet(
     user: UserInfo,
     demo: Boolean,
     settings: EngineSettings,
+    folders: List<Folder>,
     version: String,
     update: UpdateUiState,
     autoCheckUpdates: Boolean,
@@ -71,6 +73,8 @@ fun SettingsSheet(
     onChunkSize: (Int) -> Unit,
     onLossless: (Boolean) -> Unit,
     onShowBtrDetails: (Boolean) -> Unit,
+    onFolderHidden: (Long, Boolean) -> Unit,
+    onShowAllFolders: () -> Unit,
     onAutoCheckUpdates: (Boolean) -> Unit,
     onCheckUpdate: () -> Unit,
     onOpenUpdate: () -> Unit,
@@ -102,6 +106,41 @@ fun SettingsSheet(
                 onDemo = onDemo,
                 onExitDemo = onExitDemo,
             )
+
+            Spacer(Modifier.height(22.dp))
+            SectionTitle("收藏夹")
+            Text(
+                text = "关闭开关后，这个收藏夹不会出现在列表和 Android Auto 里；只影响本机显示。",
+                style = MaterialTheme.typography.bodySmall,
+                color = BiliMuted,
+            )
+            Spacer(Modifier.height(6.dp))
+            if (folders.isEmpty()) {
+                Text(
+                    text = if (user.loggedIn || demo) "还没有收藏夹" else "登录后可选择显示哪些收藏夹",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = BiliMuted.copy(alpha = 0.8f),
+                )
+            } else {
+                folders.forEachIndexed { index, folder ->
+                    if (index > 0) HorizontalDivider(color = BiliLine.copy(alpha = 0.7f))
+                    SettingSwitch(
+                        title = folder.title.ifBlank { "未命名收藏夹" },
+                        description = buildString {
+                            append("${folder.count} 个视频")
+                            if (folder.id in settings.hiddenFolderIds) append(" · 已隐藏")
+                        },
+                        checked = folder.id !in settings.hiddenFolderIds,
+                        onCheckedChange = { onFolderHidden(folder.id, !it) },
+                    )
+                }
+                if (settings.hiddenFolderIds.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    TextButton(onClick = onShowAllFolders) {
+                        Text("全部显示", color = BiliPink, fontSize = 12.sp)
+                    }
+                }
+            }
 
             Spacer(Modifier.height(22.dp))
             SectionTitle("播放引擎")

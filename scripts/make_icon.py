@@ -1,132 +1,100 @@
 #!/usr/bin/env python3
-"""生成桌面版图标（不依赖任何外部素材）。
+"""从 assets/branding 的 SVG 母版生成桌面版和网页图标。
 
-输出到 desktop/src-tauri/icons/：Tauri 打包需要的各档 PNG + Windows ico。
-只用到 Pillow，系统 Python 一般都有；没有就先 `pip install pillow`。
+SVG 是唯一母版；Android 的 VectorDrawable 使用同一套 108×108 坐标，
+所以两端的唱片、音符比例完全一致（详见 assets/branding/README.md）。
+
+依赖 cairosvg：
+
+    pip install cairosvg
+    python scripts/make_icon.py
+
+生成：
+    desktop/src-tauri/icons/*.png, icon.ico
+    bilimuse/web/favicon.svg, favicon.ico
 """
 
 from __future__ import annotations
 
+import struct
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+try:
+    import cairosvg
+except ImportError as exc:  # pragma: no cover - 只在缺少可选依赖时触发
+    raise SystemExit("缺少 cairosvg，先运行：pip install cairosvg") from exc
 
-SIZE = 1024
-SS = 4  # 超采样倍数，先画大图再缩放，边缘才不毛糙
-OUT = Path(__file__).resolve().parent.parent / "desktop" / "src-tauri" / "icons"
+ROOT = Path(__file__).resolve().parent.parent
+BRAND = ROOT / "assets" / "branding"
+DESKTOP = ROOT / "desktop" / "src-tauri" / "icons"
+WEB = ROOT / "bilimuse" / "web"
 
-BG_TOP = (22, 27, 45)
-BG_BOTTOM = (9, 11, 19)
-DISC = (17, 20, 32)
-RING = (38, 44, 66)
-ACCENT = (126, 156, 255)
-ACCENT_2 = (167, 139, 250)
-
-
-def _rounded_gradient(size: int, radius: int) -> Image.Image:
-    """竖向渐变的圆角矩形。"""
-    img = Image.new("RGBA", (size, size))
-    draw = ImageDraw.Draw(img)
-    for y in range(size):
-        t = y / max(1, size - 1)
-        color = tuple(round(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOTTOM))
-        draw.line([(0, y), (size, y)], fill=color + (255,))
-
-    mask = Image.new("L", (size, size), 0)
-    ImageDraw.Draw(mask).rounded_rectangle([(0, 0), (size - 1, size - 1)], radius=radius, fill=255)
-    img.putalpha(mask)
-    return img
+ICON_SVG = BRAND / "bilimuse-icon.svg"
+FAVICON_SVG = BRAND / "bilimuse-favicon.svg"
 
 
-def _circle(draw: ImageDraw.ImageDraw, cx: int, cy: int, r: int, **kwargs) -> None:
-    draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)], **kwargs)
+def render(svg: Path, size: int) -> bytes:
+    """把 SVG 渲染成指定边长的 8-bit PNG。"""
+    return cairosvg.svg2png(url=str(svg), output_width=size, output_height=size)
 
 
-def render() -> Image.Image:
-    size = SIZE * SS
-    img = _rounded_gradient(size, 224 * SS)
-    draw = ImageDraw.Draw(img, "RGBA")
-    center = size // 2
-    disc_cy = int(size * 0.56)
-    disc_r = int(size * 0.30)
-
-    # 背后的一点光晕：用径向渐变一次合成，逐圈叠加会糊成一圈亮边
-    glow_px = int(disc_r * 2.8)
-    gradient = Image.radial_gradient("L").resize((glow_px, glow_px), Image.BICUBIC)
-    gradient = Image.eval(gradient, lambda v: int(max(0.0, 1.0 - v / 255.0) ** 2 * 90))
-    glow = Image.new("RGBA", (glow_px, glow_px), ACCENT + (0,))
-    glow.putalpha(gradient)
-    img.alpha_composite(glow, (center - glow_px // 2, disc_cy - glow_px // 2))
-
-    # 唱片
-    _circle(draw, center, disc_cy, disc_r, fill=DISC + (255,))
-    draw.ellipse(
-        [(center - disc_r, disc_cy - disc_r), (center + disc_r, disc_cy + disc_r)],
-        outline=RING + (255,),
-        width=3 * SS,
-    )
-    for k in range(1, 5):
-        rr = int(disc_r * (0.72 + k * 0.055))
-        _circle(draw, center, disc_cy, rr, outline=RING + (120 - k * 18,), width=2 * SS)
-    _circle(draw, center, disc_cy, int(disc_r * 0.085), fill=(10, 12, 20, 255))
-    _circle(draw, center, disc_cy, int(disc_r * 0.03), fill=ACCENT + (255,))
-
-    # 音符：两个符头 + 两根符干 + 梁
-    h1 = (int(center - size * 0.088), int(size * 0.66))
-    h2 = (int(center + size * 0.100), int(size * 0.60))
-    head_r = int(size * 0.055)
-    stem_w = int(size * 0.022)
-    stem_top = int(size * 0.30)
-
-    draw.rounded_rectangle(
-        [(h1[0] + head_r - stem_w // 2, stem_top), (h1[0] + head_r + stem_w // 2, h1[1])],
-        radius=stem_w // 2,
-        fill=ACCENT + (255,),
-    )
-    draw.rounded_rectangle(
-        [(h2[0] + head_r - stem_w // 2, stem_top - size // 60), (h2[0] + head_r + stem_w // 2, h2[1])],
-        radius=stem_w // 2,
-        fill=ACCENT_2 + (255,),
-    )
-    draw.polygon(
-        [
-            (h1[0] + head_r - stem_w // 2, stem_top),
-            (h1[0] + head_r + stem_w // 2, stem_top),
-            (h2[0] + head_r + stem_w // 2, stem_top - size // 60),
-            (h2[0] + head_r - stem_w // 2, stem_top - size // 60),
-        ],
-        fill=ACCENT_2 + (255,),
-    )
-    # 符头稍微转一点角度，看着像手写谱
-    for (cx, cy), color in ((h1, ACCENT), (h2, ACCENT_2)):
-        head = Image.new("RGBA", (head_r * 3, head_r * 3), (0, 0, 0, 0))
-        hd = ImageDraw.Draw(head)
-        hd.ellipse(
-            [
-                (head.width // 2 - head_r, head.height // 2 - int(head_r * 0.78)),
-                (head.width // 2 + head_r, head.height // 2 + int(head_r * 0.78)),
-            ],
-            fill=color + (255,),
+def write_ico(path: Path, entries: list[tuple[int, bytes]]) -> None:
+    """写 PNG 压缩的 ICO（Vista+ 格式），避免引入 Pillow。"""
+    header = struct.pack("<HHH", 0, 1, len(entries))
+    offset = 6 + 16 * len(entries)
+    directory = bytearray()
+    for size, png in entries:
+        directory += struct.pack(
+            "<BBBBHHII",
+            size & 0xFF,
+            size & 0xFF,
+            0,  # 调色板颜色数
+            0,  # 保留
+            1,  # 颜色平面
+            32,  # 每像素位数
+            len(png),
+            offset,
         )
-        head = head.rotate(-18, resample=Image.BICUBIC, expand=False)
-        img.alpha_composite(head, (cx - head.width // 2, cy - head.height // 2))
-
-    return img.resize((SIZE, SIZE), Image.LANCZOS)
+        offset += len(png)
+    path.write_bytes(header + bytes(directory) + b"".join(png for _, png in entries))
 
 
 def main() -> None:
-    OUT.mkdir(parents=True, exist_ok=True)
-    master = render()
-    master.save(OUT / "icon.png")
+    for svg in (ICON_SVG, FAVICON_SVG):
+        if not svg.exists():
+            raise SystemExit(f"缺少 SVG 母版：{svg}")
 
-    sizes = {"32x32.png": 32, "128x128.png": 128, "128x128@2x.png": 256, "256x256.png": 256, "512x512.png": 512}
-    for name, px in sizes.items():
-        master.resize((px, px), Image.LANCZOS).save(OUT / name)
+    DESKTOP.mkdir(parents=True, exist_ok=True)
 
-    master.resize((256, 256), Image.LANCZOS).save(
-        OUT / "icon.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+    # 桌面版：1024 母版 + Tauri 打包需要的各档 PNG
+    (DESKTOP / "icon.png").write_bytes(render(ICON_SVG, 1024))
+    for name, px in {
+        "32x32.png": 32,
+        "128x128.png": 128,
+        "128x128@2x.png": 256,
+        "256x256.png": 256,
+        "512x512.png": 512,
+    }.items():
+        (DESKTOP / name).write_bytes(render(ICON_SVG, px))
+
+    # Windows 图标：16/24 用去掉唱片的简化版，32 以上用完整版
+    ico_entries: list[tuple[int, bytes]] = []
+    for px in (16, 24):
+        ico_entries.append((px, render(FAVICON_SVG, px)))
+    for px in (32, 48, 64, 128, 256):
+        ico_entries.append((px, render(ICON_SVG, px)))
+    write_ico(DESKTOP / "icon.ico", ico_entries)
+
+    # 网页 favicon：小尺寸同样用简化版
+    WEB.mkdir(parents=True, exist_ok=True)
+    (WEB / "favicon.svg").write_bytes(FAVICON_SVG.read_bytes())
+    write_ico(
+        WEB / "favicon.ico",
+        [(px, render(FAVICON_SVG, px)) for px in (16, 32, 48)],
     )
-    print(f"图标已生成：{OUT}")
+
+    print(f"桌面图标：{DESKTOP}")
+    print(f"网页 favicon：{WEB / 'favicon.ico'}")
 
 
 if __name__ == "__main__":

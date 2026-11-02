@@ -78,6 +78,7 @@ fun LibraryScreen(
     onPlay: (Int) -> Unit,
     onAccountClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onManageFolders: () -> Unit,
     onLoginClick: () -> Unit,
     onDemoClick: () -> Unit,
     onRetry: () -> Unit,
@@ -154,7 +155,7 @@ fun LibraryScreen(
             )
         }
 
-        FolderHeader(state)
+        FolderHeader(state, onManageFolders)
 
         Box(Modifier.weight(1f)) {
             when {
@@ -165,6 +166,7 @@ fun LibraryScreen(
                     onLogin = onLoginClick,
                     onDemo = onDemoClick,
                     onRetry = onRetry,
+                    onManageFolders = onManageFolders,
                 )
                 else -> TrackList(
                     state = state,
@@ -310,7 +312,7 @@ private fun FolderChips(
 }
 
 @Composable
-private fun FolderHeader(state: LibraryUiState) {
+private fun FolderHeader(state: LibraryUiState, onManageFolders: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -341,6 +343,14 @@ private fun FolderHeader(state: LibraryUiState) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        if (state.user.loggedIn || state.demo) {
+            TextButton(
+                onClick = onManageFolders,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+            ) {
+                Text("管理", color = BiliPink, fontSize = 12.sp)
+            }
+        }
         if (state.demo) {
             InfoChip("演示模式", BiliBlue)
         }
@@ -367,6 +377,7 @@ private fun EmptyOrError(
     onLogin: () -> Unit,
     onDemo: () -> Unit,
     onRetry: () -> Unit,
+    onManageFolders: () -> Unit,
 ) {
     Column(
         Modifier
@@ -419,6 +430,22 @@ private fun EmptyOrError(
                     modifier = Modifier.fillMaxWidth(0.7f),
                     border = BorderStroke(1.dp, BiliLine),
                 ) { Text("先玩演示模式", color = BiliText) }
+            } else if (state.allFolders.isNotEmpty() && state.folders.isEmpty()) {
+                Text("所有收藏夹已隐藏", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "隐藏只影响本机列表，B 站上的收藏不受影响。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = BiliMuted,
+                )
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = onManageFolders,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BiliPink,
+                        contentColor = Color(0xFF1A0A12),
+                    ),
+                ) { Text("管理收藏夹") }
             } else if (state.search.isNotBlank()) {
                 Text("没有找到「${state.search}」", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(6.dp))

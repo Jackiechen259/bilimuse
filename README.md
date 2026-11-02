@@ -13,6 +13,7 @@ BiliMuse 把这两件事一起解决：扫码登录后直接列出你的收藏�
 
 - **多种登录方式**：扫码，或在桌面版里用账号密码 / 手机验证码登录（内嵌 B 站官方登录页完成极验人机验证，只接收登录 cookie，不保存密码）；登录态只写本机 `~/.config/bilimuse/session.json`（权限 0600）
 - **收藏夹即歌单**：列出全部收藏夹、支持夹内搜索、顺序/循环播放、上一首下一首、空格键控制；随机播放会补全整个收藏夹（或全部搜索结果），不会只随机已加载的分页
+- **收藏夹显示管理**：桌面 / 网页版和安卓版都能在设置里逐项选择显示或隐藏收藏夹；隐藏只影响本机列表，不会取消 B 站收藏，新收藏夹默认显示
 - **音质优先**：Hi-Res 无损 → 杜比全景声 → 最高码率（192K/132K/64K），有无损就播无损
 - **BTR 引擎**：多 Range 并发、多 CDN 节点竞速、慢块对冲、断点续传、按实时速度加权调度
 - **起播不等测速**：第一个可用节点先开播，剩下的镜像在后台边测边补进节点池
@@ -20,7 +21,9 @@ BiliMuse 把这两件事一起解决：扫码登录后直接列出你的收藏�
 - **实时指标**：并发数、命中节点、块进度、瞬时速度、对冲次数，播放器右下角直接可见
 - **演示模式**：不登录也能跑通整条链路 —— 本地合成三段音频，每条连接限速 320 KB/s，直观对比开关 BTR 的差别
 - **桌面版**：Tauri v2 原生窗口 + 打包好的 Python 引擎（边车），不用开浏览器，关窗即退出；支持扫码、账号密码和短信验证码三种登录
+- **桌面设置界面**：播放与音质、BTR 引擎、收藏夹、账号、关于五个分类，音量 / 自动播放 / 引擎参数 / 收藏夹显示持久化到本机
 - **安卓版**：Kotlin + Compose + Media3 原生 App，BTR 引擎直接作为 ExoPlayer 的 DataSource，支持后台播放、通知栏/锁屏控制和演示模式
+- **Android Auto**：通过 Media3 `MediaLibraryService` 把收藏夹和收藏夹内稿件接到车机，车机端可浏览、播放并控制现有 MediaSession 播放队列
 - **安卓版自动更新**：启动时静默检查 GitHub Releases，设置页也可手动检查；应用内下载 APK、校验摘要与签名后交给系统安装器（见 [docs/ANDROID.md](docs/ANDROID.md#自动更新github-releases)）
 - **多种登录方式（安卓 / 桌面）**：原生扫码，或账号密码 / 手机验证码登录（在内嵌的 B 站官方登录页完成极验人机验证，只接收登录 cookie，不保存密码）
 - **零构建**：网页版是 FastAPI + 原生 HTML/CSS/JS，没有 npm、没有打包步骤
@@ -200,6 +203,7 @@ bilimuse/
 │   ├── config.py       # 配置与路径（含 PyInstaller 冻结路径）
 │   ├── web/            # 前端：index.html / app.js / style.css
 │   └── __main__.py     # 命令行入口
+├── assets/             # 截图 + branding/ 图标母版与预览
 ├── desktop/            # Tauri v2 桌面壳（Rust + 启动页）
 │   ├── web/index.html  # 启动页
 │   └── src-tauri/      # 窗口、边车生命周期、登录桥（login.rs）、打包配置、图标
@@ -207,9 +211,9 @@ bilimuse/
 │   ├── app/src/main/kotlin/com/bilimuse/app/
 │   │   ├── btr/        # BTR 引擎 Kotlin 移植
 │   │   ├── data/       # WBI 签名、B 站 API、登录态、演示 CDN、自动更新
-│   │   ├── player/     # MediaSessionService / MediaController / DataSource
+│   │   ├── player/     # MediaLibraryService / MediaController / DataSource
 │   │   └── ui/         # Compose 界面
-│   └── app/src/test/   # 39 个 JVM 测试
+│   └── app/src/test/   # 41 个 JVM 测试
 ├── scripts/            # 基准脚本 + 边车打包 / 图标生成
 ├── tests/              # 测试：引擎正确性、限速场景提速、断流恢复、Range、启动器
 └── docs/               # ARCHITECTURE.md / DESKTOP.md / ANDROID.md
@@ -233,7 +237,7 @@ bilimuse/
 | `POST` | `/api/track` | 解析音轨：`{"bvid": "..."}` → 流 ID、大小、音质、节点数 |
 | `GET/HEAD` | `/api/stream/{id}` | 音频流，支持 `Range` |
 | `GET` | `/api/stats/{id}` | 引擎实时指标（节点、块、速度、对冲） |
-| `GET/POST` | `/api/settings` | 开关 BTR、并发数、块大小、无损偏好 |
+| `GET/POST` | `/api/settings` | 开关 BTR、并发数、块大小、无损偏好、音量、自动播放、隐藏收藏夹 ID；持久化到 `settings.json` |
 
 ## 测试
 
@@ -247,7 +251,7 @@ bilimuse/
 cd desktop/src-tauri && cargo test --release login
 ```
 
-安卓版的引擎、WBI 签名、演示 CDN、音轨选择和自动更新另有 39 个纯 JVM 测试（不需要模拟器）：
+安卓版的引擎、WBI 签名、演示 CDN、音轨选择、Android Auto 媒体 ID 和自动更新另有 41 个纯 JVM 测试（不需要模拟器）：
 
 ```bash
 cd android && ./gradlew :app:testDebugUnitTest

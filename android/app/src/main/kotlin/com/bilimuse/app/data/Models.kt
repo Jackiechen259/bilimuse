@@ -93,6 +93,8 @@ data class EngineSettings(
     val chunkSize: Int = 512 * 1024,
     val preferLossless: Boolean = true,
     val showBtrDetails: Boolean = true,
+    /** 本机选择隐藏的收藏夹；新收藏夹默认可见。 */
+    val hiddenFolderIds: Set<Long> = emptySet(),
 ) {
     fun clamp(): EngineSettings = copy(
         concurrency = concurrency.coerceIn(1, 64),

@@ -43,7 +43,7 @@ desktop/
     ├── build.rs              # 把 target triple 固化给运行时用
     ├── tauri.conf.json       # 窗口/打包/externalBin/updater 配置
     ├── capabilities/         # Tauri v2 权限（页面不用 IPC，只留 core:default）
-    ├── icons/                # scripts/make_icon.py 生成
+    ├── icons/                # 从 assets/branding 的 SVG 母版生成
     ├── binaries/             # 边车产物（不入库）
     └── src/
         ├── main.rs           # 窗口 + 边车生命周期
@@ -53,7 +53,7 @@ desktop/
 scripts/
 ├── build_sidecar.sh          # PyInstaller 打包边车
 ├── sidecar_entry.py          # 打包入口（保留包内相对导入）
-└── make_icon.py              # 生成图标
+└── make_icon.py              # 从 SVG 母版生成桌面/网页图标
 ```
 
 ## 启动时序
@@ -69,6 +69,22 @@ scripts/
 端口用 0 而不是固定 8756：桌面版可能和网页版同时开着，也可能同时开两份，
 固定端口会直接冲突。
 
+## 设置界面
+
+桌面窗口右上角齿轮、左侧栏的「管理」或底部的「设置」都能打开偏好设置。设置窗口按桌面工具习惯
+分成五个分类：
+
+- **播放与音质**：无损优先、默认音量、当前曲目结束后自动播放下一首；
+- **播放引擎**：BTR 多线程开关、并发连接数和分块大小，修改后立即同步到已解析音轨；
+- **收藏夹**：逐项开关侧栏里要显示的收藏夹；隐藏只影响本机列表，不会取消 B 站收藏；
+- **账号**：查看当前账号 / 演示模式，登录、切换账号或退出登录；
+- **关于**：版本、运行方式、日志位置、键盘快捷键和免责声明。
+
+界面设置（包括收藏夹显示）写入 `~/.config/bilimuse/settings.json`（0600），下次启动继续生效。
+桌面版每次启动使用随机回环端口，`http://127.0.0.1:<port>` 的 localStorage 会随
+端口变化，因此音量与自动播放这类偏好也由 Python 边车持久化，而不是只存在页面里。
+登录 cookie 仍单独保存在 `session.json`，两类数据互不混合。
+
 ## 随机播放整个收藏夹
 
 桌面窗口加载的是网页版同一套前端，播放器左侧的 🔀 按钮用于随机播放（快捷键 `S`）：
@@ -76,9 +92,9 @@ scripts/
 1. 前端请求 `/api/folder/<id>/all`（夹内搜索时带上 `keyword`）；
 2. 边车把该收藏夹的分页从第 1 页翻到最后，按 bvid 去重、过滤失效稿件，一次返回完整列表
    （`bilimuse/server.py` 的 `load_all_folder_items`）；
-3. 前端把完整列表洗牌后作为播放队列，当前曲目放队首；页面列表本身仍然只渲染前 50 条；
+3. 前端把完整列表洗牌后作为播放队列，当前曲目放队首；页面列表本身仍然只渲染前 40 条；
 4. 「下一首」/ 自动切歌从整个收藏夹里随机取，播到队尾会重新洗牌继续；
-5. 即使列表只加载了前 50 条，随机范围仍是整个收藏夹；开启随机后播放器会显示
+5. 即使列表只加载了前 40 条，随机范围仍是整个收藏夹；开启随机后播放器会显示
    「正在加载整个收藏夹…」和最终的「随机范围：整个收藏夹 · N 首」。
 
 随机开关只保存在当前页面，不写配置；切换账号会清空整夹缓存。
@@ -268,8 +284,8 @@ cat .tauri/bilimuse.key.pub   # 填到 tauri.conf.json 的 plugins.updater.pubke
 2. 提交后打 tag 并推送：
 
    ```bash
-   git tag v0.2.1
-   git push origin v0.2.1
+   git tag v0.2.2
+   git push origin v0.2.2
    ```
 
 3. `.github/workflows/release.yml` 会为 Linux / Windows / macOS 构建安装包，并由

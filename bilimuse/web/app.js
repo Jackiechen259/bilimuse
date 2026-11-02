@@ -3,6 +3,61 @@
 
 const $ = (id) => document.getElementById(id);
 
+// B 站收藏夹列表接口的 ps 上限：超过 40 会返回 -400「请求错误」
+const FOLDER_PAGE_SIZE = 40;
+const PREFS_KEY = 'bilimuse.preferences';
+const DEFAULT_PREFERENCES = { volume: 0.9, autoplayNext: true };
+
+const SETTINGS_TABS = {
+  playback: {
+    title: '播放与音质',
+    subtitle: '调整音轨选择与播放器的默认行为',
+  },
+  engine: {
+    title: '播放引擎',
+    subtitle: 'BTR 多线程、并发与分块策略',
+  },
+  folders: {
+    title: '收藏夹',
+    subtitle: '选择在列表里显示哪些收藏夹',
+  },
+  account: {
+    title: '账号',
+    subtitle: '管理本机的 B 站登录态',
+  },
+  about: {
+    title: '关于 BiliMuse',
+    subtitle: '版本、运行信息与键盘快捷键',
+  },
+};
+
+let settingsToastTimer = null;
+let preferenceSaveTimer = null;
+let folderSaveTimer = null;
+let settingsReturnFocus = null;
+
+function loadPreferences() {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    const saved = raw ? JSON.parse(raw) : {};
+    const volume = Number(saved.volume);
+    return {
+      volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : DEFAULT_PREFERENCES.volume,
+      autoplayNext: typeof saved.autoplayNext === 'boolean'
+        ? saved.autoplayNext
+        : DEFAULT_PREFERENCES.autoplayNext,
+    };
+  } catch (_) {
+    return { ...DEFAULT_PREFERENCES };
+  }
+}
+
+function persistPreferences() {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(state.preferences));
+  } catch (_) { /* 无痕或受限 webview 下忽略即可 */ }
+}
+
 const state = {
   user: null,
   demo: false,
@@ -18,9 +73,19 @@ const state = {
   desktopLogin: null, // { id, mode }
   desktopMode: 'sms',
   loginMode: 'qr',    // 当前登录弹窗的 tab：qr / password / sms
-  settings: { btr_enabled: true, concurrency: 8 },
+  settings: {
+    btr_enabled: true,
+    concurrency: 8,
+    chunk_size: 524288,
+    prefer_lossless: true,
+    volume: 0.9,
+    autoplay_next: true,
+    hidden_folders: [],
+  },
+  preferences: loadPreferences(),
+  version: '',
   playToken: 0,
-  // 随机播放：列表只加载前 50 条，随机池需要整夹（或全部搜索结果）
+  // 随机播放：列表只加载前 40 条，随机池需要整夹（或全部搜索结果）
   keyword: '',          // 当前列表对应的搜索词，不是输入框的实时值
   shuffle: false,
   shuffleLoading: false,
@@ -312,13 +377,17 @@ async function toggleShuffle() {
 
 function renderAccount() {
   const u = state.user || {};
-  $('account-name').textContent = u.logged_in ? (u.uname || `UID ${u.mid}`) : '未登录';
-  $('account-hint').textContent = u.logged_in
+  const loggedIn = Boolean(u.logged_in);
+  const name = loggedIn ? (u.uname || `UID ${u.mid}`) : '未登录';
+  const hint = loggedIn
     ? (u.vip ? '大会员 · 可听 Hi-Res' : '已登录')
     : (state.demo
       ? '演示模式，无需登录'
       : (state.desktop ? '扫码 / 密码 / 短信登录' : '扫码登录后读取你的收藏夹'));
-  $('login-btn').textContent = u.logged_in ? '切换' : '登录';
+  $('account-name').textContent = name;
+  $('account-hint').textContent = hint;
+  $('login-btn').textContent = loggedIn ? '切换' : '登录';
+
   const avatar = $('avatar');
   if (u.face) {
     avatar.style.backgroundImage = `url(${u.face})`;
@@ -327,49 +396,137 @@ function renderAccount() {
     avatar.style.backgroundImage = '';
     avatar.textContent = (u.uname || 'B').slice(0, 1);
   }
+
+  // 设置 → 账号
+  const settingsName = $('settings-account-name');
+  if (!settingsName) return;
+  settingsName.textContent = state.demo && !loggedIn ? '演示模式' : name;
+  $('settings-account-hint').textContent = state.demo && !loggedIn
+    ? '当前使用本地合成音频，可随时登录 B 站账号'
+    : hint;
+  const settingsAvatar = $('settings-avatar');
+  if (u.face) {
+    settingsAvatar.style.backgroundImage = `url(${u.face})`;
+    settingsAvatar.textContent = '';
+  } else {
+    settingsAvatar.style.backgroundImage = '';
+    settingsAvatar.textContent = state.demo && !loggedIn ? '♪' : (u.uname || 'B').slice(0, 1);
+  }
+  const badge = $('settings-account-badge');
+  badge.textContent = state.demo && !loggedIn ? '演示' : (loggedIn ? (u.vip ? '大会员' : '已登录') : '未登录');
+  badge.classList.toggle('online', loggedIn);
+  $('settings-account-login').textContent = loggedIn ? '切换账号' : '登录 B 站账号';
+  $('settings-account-logout').classList.toggle('hidden', !loggedIn || state.demo);
+  $('settings-desktop-login-tag').textContent = state.desktop ? '桌面版可用' : '仅桌面版';
+  $('settings-desktop-login-tag').title = state.desktop
+    ? '通过独立官方窗口完成登录'
+    : '网页版不支持内嵌官方登录窗口，请使用扫码登录';
 }
 
 /* ------------------------------------------------------------------ 收藏夹 */
+
+function hiddenFolderIds() {
+  const saved = state.settings && Array.isArray(state.settings.hidden_folders)
+    ? state.settings.hidden_folders
+    : [];
+  return new Set(saved.map(Number).filter(Number.isFinite));
+}
+
+function visibleFolders() {
+  const hidden = hiddenFolderIds();
+  return state.folders.filter((folder) => !hidden.has(Number(folder.id)));
+}
+
+function updateFolderCount() {
+  const el = $('folder-count');
+  if (!el) return;
+  const all = state.folders.length;
+  const visible = visibleFolders().length;
+  el.textContent = all ? (visible === all ? String(all) : `${visible}/${all}`) : '';
+}
+
+function clearFolderSelection(message) {
+  state.folderId = null;
+  state.tracks = [];
+  state.index = -1;
+  state.keyword = '';
+  $('search').value = '';
+  $('folder-title').textContent = '选择一个收藏夹';
+  $('folder-meta').textContent = message;
+  renderTracks();
+}
+
+function renderFolders() {
+  const box = $('folders');
+  if (!box) return;
+  box.innerHTML = '';
+  updateFolderCount();
+  const visible = visibleFolders();
+  if (!state.folders.length) {
+    const empty = document.createElement('div');
+    empty.className = 'muted small';
+    empty.style.padding = '8px 12px';
+    empty.textContent = '没有收藏夹';
+    box.appendChild(empty);
+    return;
+  }
+
+  if (!visible.length) {
+    const empty = document.createElement('div');
+    empty.className = 'folders-empty';
+    const copy = document.createElement('span');
+    copy.textContent = '所有收藏夹都已隐藏。';
+    const manage = document.createElement('button');
+    manage.className = 'ghost';
+    manage.textContent = '管理收藏夹';
+    manage.addEventListener('click', () => openSettings('folders'));
+    empty.append(copy, manage);
+    box.appendChild(empty);
+    clearFolderSelection('所有收藏夹已隐藏，可在设置中恢复显示');
+    return;
+  }
+
+  for (const folder of visible) {
+    const btn = document.createElement('button');
+    btn.className = 'folder';
+    btn.dataset.id = String(folder.id);
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = folder.title;
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = folder.count ? String(folder.count) : '';
+    btn.append(name, count);
+    btn.addEventListener('click', () => selectFolder(folder.id, folder.title));
+    box.appendChild(btn);
+  }
+
+  const currentVisible = visible.some((folder) => folder.id === state.folderId);
+  if (currentVisible) {
+    highlightFolder(state.folderId);
+  } else {
+    const first = visible[0];
+    selectFolder(first.id, first.title);
+  }
+}
 
 async function loadFolders() {
   const box = $('folders');
   try {
     const data = await api('/api/folders');
     state.folders = data.folders || [];
-    box.innerHTML = '';
-    if (!state.folders.length) {
-      box.innerHTML = '<div class="muted small" style="padding:8px 12px">没有收藏夹</div>';
-      $('folder-count').textContent = '';
-      return;
-    }
-    $('folder-count').textContent = state.folders.length;
-    for (const folder of state.folders) {
-      const btn = document.createElement('button');
-      btn.className = 'folder';
-      btn.dataset.id = String(folder.id);
-      const name = document.createElement('span');
-      name.className = 'name';
-      name.textContent = folder.title;
-      const count = document.createElement('span');
-      count.className = 'count';
-      count.textContent = folder.count ? String(folder.count) : '';
-      btn.append(name, count);
-      btn.addEventListener('click', () => selectFolder(folder.id, folder.title));
-      box.appendChild(btn);
-    }
-    if (state.folderId === null) {
-      const first = state.folders[0];
-      selectFolder(first.id, first.title);
-    } else {
-      highlightFolder(state.folderId);
-    }
+    renderFolders();
+    renderFolderSettings();
   } catch (err) {
+    state.folders = [];
     box.innerHTML = '';
     const tip = document.createElement('div');
     tip.className = 'muted small';
     tip.style.padding = '8px 12px';
     tip.textContent = err.message;
     box.appendChild(tip);
+    $('folder-count').textContent = '';
+    renderFolderSettings();
   }
 }
 
@@ -392,7 +549,7 @@ async function loadTracks(title, keyword = '') {
   $('folder-title').textContent = title || '收藏夹';
   $('folder-meta').textContent = '正在加载…';
   try {
-    const qs = new URLSearchParams({ pn: '1', ps: '50' });
+    const qs = new URLSearchParams({ pn: '1', ps: String(FOLDER_PAGE_SIZE) });
     if (keyword) qs.set('keyword', keyword);
     const data = await api(`/api/folder/${state.folderId}?${qs}`);
     state.tracks = data.items || [];
@@ -419,7 +576,11 @@ function renderTracks() {
   box.innerHTML = '';
   $('empty').classList.toggle('hidden', state.tracks.length > 0);
   if (!state.tracks.length) {
-    $('empty-text').textContent = state.folderId === null ? '先在左侧选择一个收藏夹' : '这里还没有内容';
+    const allHidden = state.folders.length > 0 && visibleFolders().length === 0;
+    $('empty-text').textContent = allHidden
+      ? '所有收藏夹已隐藏'
+      : (state.folderId === null ? '先在左侧选择一个收藏夹' : '这里还没有内容');
+    $('empty-manage').classList.toggle('hidden', !allHidden);
     return;
   }
   state.tracks.forEach((track, i) => {
@@ -579,11 +740,18 @@ async function refreshStats() {
         `<span style="color:#fb7299">BTR</span> ${s.concurrency} 并发 · ${head} · ` +
         `${s.chunks_done}/${s.chunks_total} 块<br>` +
         `<span style="opacity:.7">${nodeLine || '单节点'}</span>`;
-      $('engine-hint').textContent =
+      const hint = $('engine-hint');
+      if (hint) hint.textContent =
         `${s.nodes.length} 节点 · ${ready ? '已就绪' : fmtSpeed(live)} · 对冲 ${s.hedges} 次`;
+      const summary = $('engine-summary');
+      if (summary) summary.textContent =
+        `BTR · ${s.concurrency} 并发 · ${ready ? '已就绪' : fmtSpeed(live)}`;
     } else {
       $('stats').innerHTML = `<span style="opacity:.7">单连接</span> · ${fmtSpeed(live)}`;
-      $('engine-hint').textContent = 'BTR 已关闭，单连接直通';
+      const hint = $('engine-hint');
+      if (hint) hint.textContent = 'BTR 已关闭，单连接直通';
+      const summary = $('engine-summary');
+      if (summary) summary.textContent = '单连接 · 直通';
     }
   } catch (_) { /* 忽略瞬时错误 */ }
 }
@@ -685,9 +853,8 @@ async function beginQrLogin() {
   }
 }
 
-/** 登录成功（含切换账号）：清掉上一个账号的收藏夹/播放列表。 */
-function afterLogin(user) {
-  state.user = user;
+/** 清掉上一个账号的收藏夹、随机池与播放状态。 */
+function resetLibraryAndPlayer() {
   state.folderId = null;
   state.tracks = [];
   state.index = -1;
@@ -720,9 +887,16 @@ function afterLogin(user) {
   $('now-sub').textContent = '选择一首开始';
   $('quality').textContent = '—';
   $('stats').textContent = 'BTR 待机';
+}
+
+/** 登录成功（含切换账号）：清掉上一个账号的收藏夹/播放列表。 */
+function afterLogin(user) {
+  state.user = user;
+  resetLibraryAndPlayer();
   renderAccount();
   renderTracks();
   updateShuffleUi();
+  syncSettingsUi();
 }
 
 function pollLogin(key) {
@@ -837,17 +1011,359 @@ function closeLogin(cancelDesktop = true) {
 
 /* ------------------------------------------------------------------ 设置 */
 
-async function saveSettings(patch) {
+function applyPreferences() {
+  const audio = $('audio');
+  if (audio) audio.volume = state.preferences.volume;
+  const playerVolume = $('volume');
+  if (playerVolume) playerVolume.value = String(state.preferences.volume);
+  const volume = $('settings-volume');
+  if (volume) volume.value = String(state.preferences.volume);
+  const percent = Math.round(state.preferences.volume * 100);
+  const value = $('settings-volume-value');
+  if (value) value.textContent = `${percent}%`;
+  if (volume) {
+    volume.style.background =
+      `linear-gradient(90deg, var(--pink) 0%, #c86dd7 ${percent}%, #343b4c ${percent}%, #343b4c 100%)`;
+  }
+  const autoplay = $('autoplay-next');
+  if (autoplay) autoplay.checked = state.preferences.autoplayNext;
+}
+
+function syncPreferencesFromSettings(s) {
+  if (!s) return;
+  if (typeof s.volume === 'number' && Number.isFinite(s.volume)) {
+    state.preferences.volume = Math.min(1, Math.max(0, s.volume));
+  }
+  if (typeof s.autoplay_next === 'boolean') {
+    state.preferences.autoplayNext = s.autoplay_next;
+  }
+  persistPreferences();
+}
+
+function flushPreferenceSave() {
+  if (!preferenceSaveTimer) return;
+  clearTimeout(preferenceSaveTimer);
+  preferenceSaveTimer = null;
+  saveSettings({
+    volume: state.preferences.volume,
+    autoplay_next: state.preferences.autoplayNext,
+  }, { quiet: true });
+}
+
+function setPreference(patch) {
+  state.preferences = { ...state.preferences, ...patch };
+  persistPreferences();
+  applyPreferences();
+  // 滑动音量时只发最后一次请求；服务端持久化后，换端口重开也能恢复。
+  clearTimeout(preferenceSaveTimer);
+  preferenceSaveTimer = setTimeout(() => {
+    preferenceSaveTimer = null;
+    saveSettings({
+      volume: state.preferences.volume,
+      autoplay_next: state.preferences.autoplayNext,
+    }, { quiet: true });
+  }, 260);
+}
+
+function renderFolderSettings() {
+  const box = $('folder-visibility-list');
+  if (!box) return;
+  const summary = $('folder-visibility-summary');
+  const showAll = $('show-all-folders');
+  const hidden = hiddenFolderIds();
+  const visible = visibleFolders();
+
+  if (summary) {
+    if (state.folders.length) {
+      summary.textContent = `已显示 ${visible.length} / ${state.folders.length}`;
+    } else {
+      summary.textContent = state.user && state.user.logged_in ? '没有收藏夹' : '登录后可管理';
+    }
+  }
+  if (showAll) {
+    showAll.classList.toggle('hidden', !state.folders.length || hidden.size === 0);
+  }
+
+  box.innerHTML = '';
+  if (!state.folders.length) {
+    const empty = document.createElement('div');
+    empty.className = 'settings-empty';
+    empty.textContent = state.user && state.user.logged_in
+      ? '还没有收藏夹。'
+      : '登录后可以在这里选择显示哪些收藏夹。';
+    box.appendChild(empty);
+    return;
+  }
+
+  for (const folder of state.folders) {
+    const isHidden = hidden.has(Number(folder.id));
+    const row = document.createElement('label');
+    row.className = 'setting-row folder-visibility-row';
+
+    const copy = document.createElement('span');
+    copy.className = 'setting-copy';
+    const title = document.createElement('span');
+    title.className = 'setting-title';
+    title.textContent = folder.title || '未命名收藏夹';
+    const desc = document.createElement('span');
+    desc.className = 'setting-desc';
+    desc.textContent = [
+      folder.count ? `${folder.count} 个视频` : '',
+      isHidden ? '已隐藏' : '显示在列表',
+    ].filter(Boolean).join(' · ');
+    copy.append(title, desc);
+
+    const sw = document.createElement('span');
+    sw.className = 'switch';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = !isHidden;
+    input.setAttribute('aria-label', `显示收藏夹 ${folder.title || ''}`);
+    const knob = document.createElement('span');
+    sw.append(input, knob);
+    input.addEventListener('change', () => setFolderHidden(folder.id, !input.checked));
+
+    row.append(copy, sw);
+    box.appendChild(row);
+  }
+}
+
+function persistHiddenFolders() {
+  const value = state.settings.hidden_folders.slice();
+  folderSaveChain = folderSaveChain
+    .catch(() => { /* 上一次失败不阻塞下一次 */ })
+    .then(async () => {
+      const saved = await api('/api/settings', {
+        method: 'POST',
+        body: JSON.stringify({ hidden_folders: value }),
+      });
+      // 请求期间用户可能又改了：只在本地没有更新时采用服务端结果。
+      if (!folderSaveTimer && JSON.stringify(state.settings.hidden_folders) === JSON.stringify(value)) {
+        folderSaveDirty = false;
+        state.settings.hidden_folders = saved.hidden_folders || [];
+        renderFolders();
+        renderFolderSettings();
+      }
+    })
+    .catch((err) => {
+      showSettingsToast(`收藏夹设置保存失败：${err.message}`, true);
+    });
+}
+
+let folderSaveChain = Promise.resolve();
+let folderSaveDirty = false;
+
+function scheduleHiddenFoldersSave() {
+  clearTimeout(folderSaveTimer);
+  folderSaveTimer = setTimeout(() => {
+    folderSaveTimer = null;
+    persistHiddenFolders();
+  }, 260);
+}
+
+function flushFolderSave() {
+  if (!folderSaveTimer) return;
+  clearTimeout(folderSaveTimer);
+  folderSaveTimer = null;
+  persistHiddenFolders();
+}
+
+function setFolderHidden(id, hidden) {
+  const ids = hiddenFolderIds();
+  const key = Number(id);
+  if (!Number.isFinite(key)) return;
+  if (hidden) ids.add(key);
+  else ids.delete(key);
+  state.settings.hidden_folders = [...ids].sort((a, b) => a - b);
+  folderSaveDirty = true;
+  renderFolders();
+  renderFolderSettings();
+  scheduleHiddenFoldersSave();
+}
+
+function showAllFolders() {
+  if (!hiddenFolderIds().size) return;
+  state.settings.hidden_folders = [];
+  folderSaveDirty = true;
+  renderFolders();
+  renderFolderSettings();
+  clearTimeout(folderSaveTimer);
+  folderSaveTimer = null;
+  persistHiddenFolders();
+}
+
+function updateEngineSummary() {
+  const s = state.settings || {};
+  const enabled = s.btr_enabled !== false;
+  const summary = $('engine-summary');
+  if (summary) {
+    summary.textContent = enabled
+      ? `BTR 多线程 · ${s.concurrency || 8} 并发`
+      : '单连接 · 直通模式';
+  }
+  const hint = $('engine-hint');
+  if (hint) {
+    hint.textContent = enabled
+      ? `BTR 已开启 · ${s.concurrency || 8} 并发 · ${Math.round((s.chunk_size || 524288) / 1024)} KB/块`
+      : 'BTR 已关闭，当前使用单连接直通';
+  }
+  const card = $('engine-status-card');
+  if (card) card.classList.toggle('off', !enabled);
+  const rail = $('settings-rail-status');
+  if (rail) rail.textContent = enabled ? '本地引擎已连接' : '单连接模式';
+  const engineMode = $('settings-engine-mode-inline');
+  if (engineMode) {
+    engineMode.textContent = enabled ? 'BTR 多线程' : '单连接直通';
+  }
+}
+
+function syncSettingsUi() {
+  const s = state.settings || {};
+  const enabled = s.btr_enabled !== false;
+  const lossless = $('prefer-lossless');
+  if (lossless) lossless.checked = s.prefer_lossless !== false;
+  if ($('btr-toggle')) $('btr-toggle').checked = enabled;
+
+  document.querySelectorAll('#settings-concurrency [data-value]').forEach((btn) => {
+    const selected = Number(btn.dataset.value) === Number(s.concurrency);
+    btn.classList.toggle('selected', selected);
+    btn.setAttribute('aria-pressed', String(selected));
+    btn.disabled = !enabled;
+  });
+  document.querySelectorAll('#settings-chunk-size [data-value]').forEach((btn) => {
+    const selected = Number(btn.dataset.value) === Number(s.chunk_size);
+    btn.classList.toggle('selected', selected);
+    btn.setAttribute('aria-pressed', String(selected));
+    btn.disabled = !enabled;
+  });
+  if ($('btr-options')) $('btr-options').classList.toggle('is-disabled', !enabled);
+  if ($('btr-chunk-options')) $('btr-chunk-options').classList.toggle('is-disabled', !enabled);
+
+  const version = state.version || '0.2.2';
+  ['settings-version', 'settings-version-inline'].forEach((id) => {
+    const el = $(id);
+    if (el) el.textContent = version;
+  });
+  const mode = state.desktop ? '桌面版' : '网页版';
+  ['settings-runtime-mode', 'settings-runtime-mode-inline'].forEach((id) => {
+    const el = $(id);
+    if (el) el.textContent = mode;
+  });
+
+  applyPreferences();
+  updateEngineSummary();
+  renderFolderSettings();
+}
+
+function setSettingsTab(tab) {
+  const next = SETTINGS_TABS[tab] ? tab : 'playback';
+  document.querySelectorAll('[data-settings-tab]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.settingsTab === next);
+  });
+  document.querySelectorAll('[data-settings-pane]').forEach((pane) => {
+    pane.classList.toggle('active', pane.dataset.settingsPane === next);
+  });
+  $('settings-title').textContent = SETTINGS_TABS[next].title;
+  $('settings-subtitle').textContent = SETTINGS_TABS[next].subtitle;
+  const scroll = document.querySelector('.settings-scroll');
+  if (scroll) scroll.scrollTop = 0;
+}
+
+function openSettings(tab = 'playback') {
+  settingsReturnFocus = document.activeElement;
+  syncSettingsUi();
+  setSettingsTab(tab);
+  $('settings-modal').classList.remove('hidden');
+  document.body.classList.add('settings-open');
+  setTimeout(() => $('close-settings').focus(), 30);
+}
+
+function closeSettings() {
+  flushPreferenceSave();
+  flushFolderSave();
+  $('settings-modal').classList.add('hidden');
+  document.body.classList.remove('settings-open');
+  if (settingsReturnFocus && typeof settingsReturnFocus.focus === 'function') {
+    settingsReturnFocus.focus();
+  }
+  settingsReturnFocus = null;
+}
+
+function showSettingsToast(message, isError = false) {
+  const toast = $('settings-toast');
+  if (!toast) return;
+  clearTimeout(settingsToastTimer);
+  toast.textContent = message;
+  toast.classList.toggle('error', isError);
+  toast.classList.add('visible');
+  settingsToastTimer = setTimeout(() => toast.classList.remove('visible'), 1900);
+}
+
+async function saveSettings(patch, { quiet = false } = {}) {
+  const hiddenPending = folderSaveDirty || Boolean(folderSaveTimer);
+  const localHidden = state.settings.hidden_folders;
   try {
     const s = await api('/api/settings', { method: 'POST', body: JSON.stringify(patch) });
     state.settings = s;
-    $('btr-toggle').checked = s.btr_enabled;
-    $('concurrency').value = String(s.concurrency);
-    $('engine-hint').textContent = s.btr_enabled
-      ? `BTR 已开启 · ${s.concurrency} 并发 · ${Math.round(s.chunk_size / 1024)}KB/块`
-      : 'BTR 已关闭，单连接直通';
+    // 收藏夹显示使用独立的串行队列；别让旧响应覆盖用户刚切好的本地状态。
+    if (hiddenPending) state.settings.hidden_folders = localHidden;
+    syncPreferencesFromSettings(s);
+    syncSettingsUi();
+    if (!quiet) showSettingsToast('设置已保存');
   } catch (err) {
-    $('engine-hint').textContent = err.message;
+    syncSettingsUi();
+    showSettingsToast(`保存失败：${err.message}`, true);
+  }
+}
+
+let logoutConfirmTimer = null;
+
+async function handleLogoutClick() {
+  const btn = $('settings-account-logout');
+  if (!btn) return;
+  if (btn.dataset.confirm !== '1') {
+    btn.dataset.confirm = '1';
+    btn.textContent = '再次点击确认退出';
+    clearTimeout(logoutConfirmTimer);
+    logoutConfirmTimer = setTimeout(() => {
+      btn.dataset.confirm = '';
+      btn.textContent = '退出登录';
+    }, 3200);
+    return;
+  }
+
+  clearTimeout(logoutConfirmTimer);
+  btn.dataset.confirm = '';
+  btn.disabled = true;
+  btn.textContent = '正在退出…';
+  try {
+    await api('/api/logout', { method: 'POST' });
+    state.user = {
+      logged_in: false,
+      mid: 0,
+      uname: '',
+      face: '',
+      vip: false,
+    };
+    resetLibraryAndPlayer();
+    state.folders = [];
+    $('folders').innerHTML = '';
+    $('folder-count').textContent = '';
+    $('search').value = '';
+    $('folder-title').textContent = '选择一个收藏夹';
+    $('folder-meta').textContent = state.desktop
+      ? '还没有登录，点「登录」扫码，或使用账号密码 / 短信验证码'
+      : '还没有登录，点「登录」扫码';
+    renderAccount();
+    renderTracks();
+    updateShuffleUi();
+    syncSettingsUi();
+    closeSettings();
+  } catch (err) {
+    showSettingsToast(`退出失败：${err.message}`, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '退出登录';
   }
 }
 
@@ -861,18 +1377,17 @@ async function boot() {
     state.demo = data.demo;
     state.desktop = Boolean(data.desktop);
     state.settings = data.settings;
+    state.version = data.version || state.version;
+    syncPreferencesFromSettings(data.settings);
     $('login-tabs').classList.toggle('hidden', !state.desktop);
     renderAccount();
     updateShuffleUi();
-    $('btr-toggle').checked = data.settings.btr_enabled;
-    $('concurrency').value = String(data.settings.concurrency);
-    $('engine-hint').textContent = data.settings.btr_enabled
-      ? `BTR 已开启 · ${data.settings.concurrency} 并发`
-      : 'BTR 已关闭，单连接直通';
+    applyPreferences();
+    syncSettingsUi();
     if (!data.user.logged_in && !data.demo) {
       $('folder-meta').textContent = state.desktop
-        ? '还没有登录，点右上角「登录」扫码，或使用账号密码 / 短信验证码'
-        : '还没有登录，点右上角「登录」扫码';
+        ? '还没有登录，点「登录」扫码，或使用账号密码 / 短信验证码'
+        : '还没有登录，点「登录」扫码';
       state.folderId = null;
       renderTracks();
       return;
@@ -905,9 +1420,48 @@ $('login-window-cancel').addEventListener('click', async () => {
   closeLogin(false);
 });
 $('login-window-retry').addEventListener('click', () => beginDesktopLogin(state.desktopMode));
+
+// 收藏夹显示管理
+$('manage-folders').addEventListener('click', () => openSettings('folders'));
+$('empty-manage').addEventListener('click', () => openSettings('folders'));
+$('show-all-folders').addEventListener('click', showAllFolders);
+
+// 设置窗口
+$('open-settings').addEventListener('click', () => openSettings());
+$('settings-btn').addEventListener('click', () => openSettings());
+$('close-settings').addEventListener('click', closeSettings);
+$('settings-modal').addEventListener('click', (evt) => {
+  if (evt.target === $('settings-modal')) closeSettings();
+});
+document.querySelectorAll('[data-settings-tab]').forEach((btn) => {
+  btn.addEventListener('click', () => setSettingsTab(btn.dataset.settingsTab));
+});
+$('settings-account-login').addEventListener('click', () => {
+  closeSettings();
+  openLogin();
+});
+$('settings-account-logout').addEventListener('click', handleLogoutClick);
+
 $('btr-toggle').addEventListener('change', (evt) => saveSettings({ btr_enabled: evt.target.checked }));
-$('concurrency').addEventListener('change', (evt) => saveSettings({ concurrency: Number(evt.target.value) }));
-$('volume').addEventListener('input', (evt) => { $('audio').volume = Number(evt.target.value); });
+document.querySelectorAll('#settings-concurrency [data-value]').forEach((btn) => {
+  btn.addEventListener('click', () => saveSettings({ concurrency: Number(btn.dataset.value) }));
+});
+document.querySelectorAll('#settings-chunk-size [data-value]').forEach((btn) => {
+  btn.addEventListener('click', () => saveSettings({ chunk_size: Number(btn.dataset.value) }));
+});
+$('prefer-lossless').addEventListener('change', (evt) => {
+  saveSettings({ prefer_lossless: evt.target.checked });
+});
+$('settings-volume').addEventListener('input', (evt) => {
+  setPreference({ volume: Number(evt.target.value) });
+});
+$('autoplay-next').addEventListener('change', (evt) => {
+  setPreference({ autoplayNext: evt.target.checked });
+});
+
+$('volume').addEventListener('input', (evt) => {
+  setPreference({ volume: Number(evt.target.value) });
+});
 $('search').addEventListener('input', debounce((evt) => {
   if (state.folderId === null) return;
   const title = $('folder-title').textContent;
@@ -934,7 +1488,9 @@ $('audio').addEventListener('progress', () => {
 
 $('audio').addEventListener('play', () => { $('play').textContent = '❚❚'; startStats(); });
 $('audio').addEventListener('pause', () => { $('play').textContent = '▶'; stopStats(); });
-$('audio').addEventListener('ended', () => playNext(1));
+$('audio').addEventListener('ended', () => {
+  if (state.preferences.autoplayNext) playNext(1);
+});
 $('audio').addEventListener('error', () => {
   if (!state.current) return;
   $('stats').textContent = '音频中断，正在重试…';
@@ -945,6 +1501,17 @@ $('audio').addEventListener('error', () => {
 });
 
 document.addEventListener('keydown', (evt) => {
+  const settingsOpen = !$('settings-modal').classList.contains('hidden');
+  const loginOpen = !$('login-modal').classList.contains('hidden');
+  if (settingsOpen) {
+    if (evt.code === 'Escape') { evt.preventDefault(); closeSettings(); }
+    return;
+  }
+  if (loginOpen) {
+    if (evt.code === 'Escape') { evt.preventDefault(); closeLogin(); }
+    return;
+  }
+
   const tag = (evt.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
   if (evt.code === 'Space') { evt.preventDefault(); togglePlay(); }
@@ -955,6 +1522,10 @@ document.addEventListener('keydown', (evt) => {
   else if (evt.code === 'KeyS') toggleShuffle();
 });
 
-window.addEventListener('beforeunload', stopStats);
+window.addEventListener('beforeunload', () => {
+  stopStats();
+  flushFolderSave();
+  flushPreferenceSave();
+});
 
 boot();

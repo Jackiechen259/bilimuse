@@ -2,11 +2,9 @@ package com.bilimuse.app.player
 
 import android.content.ComponentName
 import android.content.Context
-import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -284,20 +282,7 @@ class PlayerController(
         runCatching { MediaController.releaseFuture(future) }
     }
 
-    private fun TrackItem.toMediaItem(): MediaItem {
-        val metadata = MediaMetadata.Builder()
-            .setTitle(title)
-            .setArtist(upper.ifBlank { "B站收藏夹" })
-            .apply {
-                if (cover.isNotBlank()) setArtworkUri(Uri.parse(cover))
-            }
-            .build()
-        return MediaItem.Builder()
-            .setMediaId(bvid)
-            .setUri("bilimuse://track/$bvid")
-            .setMediaMetadata(metadata)
-            .build()
-    }
+    private fun TrackItem.toMediaItem(): MediaItem = AutoLibrary.trackItem(this)
 
     private companion object {
         /** 每次 addMediaItems 的批量大小：太大可能触发 Binder 事务上限。 */

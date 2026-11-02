@@ -1,21 +1,86 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 启动页图标：渐变圆环 + 黑胶唱片，比例与启动器图标可见区一致。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="96dp"
-    android:height="96dp"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FB7299"
-        android:pathData="M54,54m-30,0a30,30 0 1,0 60,0a30,30 0 1,0 -60,0" />
-    <path
-        android:pathData="M60,34 L60,68"
-        android:strokeColor="#0B0D12"
-        android:strokeWidth="6"
-        android:strokeLineCap="round" />
-    <path
-        android:fillColor="#0B0D12"
-        android:pathData="M60,35 C69,39 73,47 70,56 C68,50 65,46 60,44 Z" />
-    <path
-        android:fillColor="#0B0D12"
-        android:pathData="M46,71 a14,10 0 1,0 28,0 a14,10 0 1,0 -28,0" />
+
+    <path android:pathData="M54,54 m-36,0 a36,36 0 1,0 72,0 a36,36 0 1,0 -72,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="18"
+                android:startY="18"
+                android:endX="90"
+                android:endY="90"
+                android:startColor="#FB7299"
+                android:centerColor="#A55EEA"
+                android:endColor="#00AEEC" />
+        </aapt:attr>
+    </path>
+
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.6667"
+        android:scaleY="0.6667">
+
+        <path android:pathData="M54,54 m-31.5,0 a31.5,31.5 0 1,0 63,0 a31.5,31.5 0 1,0 -63,0">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="54"
+                    android:startY="22.5"
+                    android:endX="54"
+                    android:endY="85.5"
+                    android:startColor="#14192A"
+                    android:endColor="#06080E" />
+            </aapt:attr>
+        </path>
+
+        <path
+            android:pathData="M54,54 m-27,0 a27,27 0 1,0 54,0 a27,27 0 1,0 -54,0"
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFF"
+            android:strokeAlpha="0.09"
+            android:strokeWidth="0.65" />
+        <path
+            android:pathData="M54,54 m-23.6,0 a23.6,23.6 0 1,0 47.2,0 a23.6,23.6 0 1,0 -47.2,0"
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFF"
+            android:strokeAlpha="0.09"
+            android:strokeWidth="0.65" />
+
+        <group
+            android:translateX="-0.5"
+            android:translateY="1">
+            <group
+                android:pivotX="43.5"
+                android:pivotY="66"
+                android:rotation="-20">
+                <path
+                    android:pathData="M34.1,66 a9.4,7.1 0 1,0 18.8,0 a9.4,7.1 0 1,0 -18.8,0"
+                    android:fillColor="#F5F7FF" />
+            </group>
+            <group
+                android:pivotX="64"
+                android:pivotY="62"
+                android:rotation="-20">
+                <path
+                    android:pathData="M54.6,62 a9.4,7.1 0 1,0 18.8,0 a9.4,7.1 0 1,0 -18.8,0"
+                    android:fillColor="#F5F7FF" />
+            </group>
+            <path
+                android:pathData="M48.4,36.6 a2.6,2.6 0 0 1 5.2,0 v26.8 a2.6,2.6 0 0 1 -5.2,0 z"
+                android:fillColor="#F5F7FF" />
+            <path
+                android:pathData="M69,32.8 a2.6,2.6 0 0 1 5.2,0 v26.8 a2.6,2.6 0 0 1 -5.2,0 z"
+                android:fillColor="#F5F7FF" />
+            <path
+                android:pathData="M48.4,34 L74.2,30.2 L74.2,37 L48.4,40.8 Z"
+                android:fillColor="#F5F7FF" />
+        </group>
+    </group>
 </vector>

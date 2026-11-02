@@ -44,7 +44,10 @@ data class LibraryUiState(
     val loading: Boolean = true,
     val user: UserInfo = UserInfo(),
     val demo: Boolean = false,
+    /** 当前显示在收藏夹条里的收藏夹（已按本机设置过滤）。 */
     val folders: List<Folder> = emptyList(),
+    /** 账号下的全部收藏夹，设置页用它来解释每一项的显示开关。 */
+    val allFolders: List<Folder> = emptyList(),
     val selectedFolderId: Long? = null,
     val folderTitle: String = "",
     val tracks: List<TrackItem> = emptyList(),
@@ -163,7 +166,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 loadFolders()
             } else {
                 _library.update {
-                    it.copy(folders = emptyList(), tracks = emptyList(), selectedFolderId = null)
+                    it.copy(
+                        folders = emptyList(),
+                        allFolders = emptyList(),
+                        tracks = emptyList(),
+                        selectedFolderId = null,
+                    )
                 }
             }
         }
@@ -266,6 +274,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             it.copy(
                 demo = false,
                 folders = emptyList(),
+                allFolders = emptyList(),
                 tracks = emptyList(),
                 selectedFolderId = null,
                 loading = true,
@@ -278,38 +287,87 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun loadFolders() {
         if (registry.demoMode) {
-            _library.update {
-                it.copy(
-                    folders = listOf(DemoData.folder),
-                    loading = false,
-                    error = null,
-                )
-            }
-            selectFolder(DemoData.folder.id, DemoData.folder.title)
+            applyFolderVisibility(listOf(DemoData.folder))
             return
         }
         try {
-            val folders = bili.folders()
-            _library.update { it.copy(folders = folders, loading = false, error = null) }
-            if (folders.isEmpty()) {
-                _library.update {
-                    it.copy(tracks = emptyList(), folderTitle = "收藏夹", total = 0)
-                }
-                return
-            }
-            val current = _library.value.selectedFolderId
-            val folder = folders.firstOrNull { it.id == current } ?: folders.first()
-            selectFolder(folder.id, folder.title)
+            applyFolderVisibility(bili.folders())
         } catch (e: CancellationException) {
             throw e
         } catch (e: NotLoggedInException) {
             _library.update {
-                it.copy(loading = false, user = UserInfo(), folders = emptyList())
+                it.copy(
+                    loading = false,
+                    user = UserInfo(),
+                    folders = emptyList(),
+                    allFolders = emptyList(),
+                )
             }
             _needLogin.tryEmit(Unit)
         } catch (e: Exception) {
             _library.update { it.copy(loading = false, error = e.message ?: "收藏夹加载失败") }
         }
+    }
+
+    /**
+     * 按本机保存的隐藏列表过滤收藏夹。
+     * 当前收藏夹被隐藏时自动切到第一个可见项；全部隐藏则清空列表并停在空状态。
+     */
+    private fun applyFolderVisibility(allFolders: List<Folder>) {
+        val hidden = settingsStore.settings.value.hiddenFolderIds
+        val visible = allFolders.filterNot { it.id in hidden }
+        val current = visible.firstOrNull { it.id == _library.value.selectedFolderId }
+
+        if (visible.isEmpty()) {
+            tracksJob?.cancel()
+            searchJob?.cancel()
+            _library.update {
+                it.copy(
+                    allFolders = allFolders,
+                    folders = emptyList(),
+                    selectedFolderId = null,
+                    folderTitle = if (allFolders.isEmpty()) "收藏夹" else "选择一个收藏夹",
+                    tracks = emptyList(),
+                    total = 0,
+                    page = 1,
+                    hasMore = false,
+                    loading = false,
+                    loadingTracks = false,
+                    loadingMore = false,
+                    search = "",
+                    error = null,
+                )
+            }
+            return
+        }
+
+        _library.update {
+            it.copy(
+                allFolders = allFolders,
+                folders = visible,
+                loading = false,
+                error = null,
+            )
+        }
+        if (current != null) return
+        val next = visible.first()
+        selectFolder(next.id, next.title)
+    }
+
+    fun setFolderHidden(folderId: Long, hidden: Boolean) {
+        val settings = settingsStore.settings.value
+        if ((folderId in settings.hiddenFolderIds) == hidden) return
+        settingsStore.setFolderHidden(folderId, hidden)
+        applyFolderVisibility(_library.value.allFolders)
+        if (hidden && _library.value.folders.isEmpty() && _library.value.allFolders.isNotEmpty()) {
+            _messages.tryEmit("所有收藏夹已隐藏，可在设置 → 收藏夹中恢复")
+        }
+    }
+
+    fun showAllFolders() {
+        if (settingsStore.settings.value.hiddenFolderIds.isEmpty()) return
+        settingsStore.showAllFolders()
+        applyFolderVisibility(_library.value.allFolders)
     }
 
     fun selectFolder(id: Long, title: String) {

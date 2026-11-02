@@ -145,6 +145,7 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
                         else showSettings = true
                     },
                     onSettingsClick = { showSettings = true },
+                    onManageFolders = { showSettings = true },
                     onLoginClick = { showLogin = true },
                     onDemoClick = { viewModel.enterDemo() },
                     onRetry = viewModel::retry,
@@ -212,6 +213,7 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
             user = library.user,
             demo = library.demo,
             settings = settings,
+            folders = library.allFolders,
             version = BuildConfig.VERSION_NAME,
             update = update,
             autoCheckUpdates = autoCheckUpdates,
@@ -237,6 +239,8 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
             onChunkSize = viewModel::setChunkSize,
             onLossless = viewModel::setPreferLossless,
             onShowBtrDetails = viewModel::setShowBtrDetails,
+            onFolderHidden = viewModel::setFolderHidden,
+            onShowAllFolders = viewModel::showAllFolders,
             onAutoCheckUpdates = viewModel::setAutoCheckUpdates,
             onCheckUpdate = viewModel::checkForUpdates,
             onOpenUpdate = {
