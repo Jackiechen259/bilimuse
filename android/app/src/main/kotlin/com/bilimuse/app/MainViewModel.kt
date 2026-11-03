@@ -46,7 +46,7 @@ data class LibraryUiState(
     val demo: Boolean = false,
     /** 当前显示在收藏夹条里的收藏夹（已按本机设置过滤）。 */
     val folders: List<Folder> = emptyList(),
-    /** 账号下的全部收藏夹，设置页用它来解释每一项的显示开关。 */
+    /** 账号下的全部收藏夹，收藏夹管理页用它来解释每一项的显示开关。 */
     val allFolders: List<Folder> = emptyList(),
     val selectedFolderId: Long? = null,
     val folderTitle: String = "",
@@ -360,7 +360,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         settingsStore.setFolderHidden(folderId, hidden)
         applyFolderVisibility(_library.value.allFolders)
         if (hidden && _library.value.folders.isEmpty() && _library.value.allFolders.isNotEmpty()) {
-            _messages.tryEmit("所有收藏夹已隐藏，可在设置 → 收藏夹中恢复")
+            _messages.tryEmit("所有收藏夹已隐藏，可在收藏夹管理中恢复")
         }
     }
 

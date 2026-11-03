@@ -30,8 +30,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -48,7 +46,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.bilimuse.app.data.EngineSettings
-import com.bilimuse.app.data.Folder
 import com.bilimuse.app.data.UserInfo
 import com.bilimuse.app.data.update.UpdateStatus
 import com.bilimuse.app.data.update.UpdateUiState
@@ -59,7 +56,6 @@ fun SettingsSheet(
     user: UserInfo,
     demo: Boolean,
     settings: EngineSettings,
-    folders: List<Folder>,
     version: String,
     update: UpdateUiState,
     autoCheckUpdates: Boolean,
@@ -73,8 +69,6 @@ fun SettingsSheet(
     onChunkSize: (Int) -> Unit,
     onLossless: (Boolean) -> Unit,
     onShowBtrDetails: (Boolean) -> Unit,
-    onFolderHidden: (Long, Boolean) -> Unit,
-    onShowAllFolders: () -> Unit,
     onAutoCheckUpdates: (Boolean) -> Unit,
     onCheckUpdate: () -> Unit,
     onOpenUpdate: () -> Unit,
@@ -108,46 +102,11 @@ fun SettingsSheet(
             )
 
             Spacer(Modifier.height(22.dp))
-            SectionTitle("收藏夹")
-            Text(
-                text = "关闭开关后，这个收藏夹不会出现在列表和 Android Auto 里；只影响本机显示。",
-                style = MaterialTheme.typography.bodySmall,
-                color = BiliMuted,
-            )
-            Spacer(Modifier.height(6.dp))
-            if (folders.isEmpty()) {
-                Text(
-                    text = if (user.loggedIn || demo) "还没有收藏夹" else "登录后可选择显示哪些收藏夹",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = BiliMuted.copy(alpha = 0.8f),
-                )
-            } else {
-                folders.forEachIndexed { index, folder ->
-                    if (index > 0) HorizontalDivider(color = BiliLine.copy(alpha = 0.7f))
-                    SettingSwitch(
-                        title = folder.title.ifBlank { "未命名收藏夹" },
-                        description = buildString {
-                            append("${folder.count} 个视频")
-                            if (folder.id in settings.hiddenFolderIds) append(" · 已隐藏")
-                        },
-                        checked = folder.id !in settings.hiddenFolderIds,
-                        onCheckedChange = { onFolderHidden(folder.id, !it) },
-                    )
-                }
-                if (settings.hiddenFolderIds.isNotEmpty()) {
-                    Spacer(Modifier.height(4.dp))
-                    TextButton(onClick = onShowAllFolders) {
-                        Text("全部显示", color = BiliPink, fontSize = 12.sp)
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(22.dp))
             SectionTitle("播放引擎")
 
             SettingSwitch(
                 title = "BTR 多线程",
-                description = "多连接 / 多 CDN 分段拉流，跨境线路更快",
+                description = "多连接、多 CDN 分段拉流",
                 checked = settings.btrEnabled,
                 onCheckedChange = onBtrEnabled,
             )
@@ -177,7 +136,7 @@ fun SettingsSheet(
                 }
             }
             Text(
-                "节点本身很快时会自动降低并发；出现慢块再逐渐拉满",
+                "线路快时自动降并发，遇慢块再拉满",
                 style = MaterialTheme.typography.bodySmall,
                 color = BiliMuted,
                 modifier = Modifier.padding(top = 4.dp),
@@ -209,7 +168,7 @@ fun SettingsSheet(
             Spacer(Modifier.height(8.dp))
             SettingSwitch(
                 title = "无损优先",
-                description = "有 Hi-Res 或杜比音轨就用（需要大会员）",
+                description = "Hi-Res / 杜比优先（需大会员）",
                 checked = settings.preferLossless,
                 onCheckedChange = onLossless,
             )
@@ -246,7 +205,7 @@ fun SettingsSheet(
 
             SettingSwitch(
                 title = "显示 BTR 详情",
-                description = "关闭后播放页不再显示 BTR 引擎、节点与分块进度卡片",
+                description = "关闭后播放页隐藏引擎与分块卡片",
                 checked = settings.showBtrDetails,
                 onCheckedChange = onShowBtrDetails,
             )
@@ -298,20 +257,19 @@ fun SettingsSheet(
             Spacer(Modifier.height(4.dp))
             SettingSwitch(
                 title = "自动检查更新",
-                description = "启动时查询 GitHub Releases，每 6 小时最多一次",
+                description = "启动时检查，每 6 小时最多一次",
                 checked = autoCheckUpdates,
                 onCheckedChange = onAutoCheckUpdates,
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "把 B 站收藏夹变成私人音乐库，内置 BTR 多线程 / 多 CDN 流式加速。" +
-                    "引擎、登录态与播放缓存都只在本机。",
+                text = "把 B 站收藏夹变成私人音乐库，引擎、登录态与播放缓存都只在本机。",
                 style = MaterialTheme.typography.bodySmall,
                 color = BiliMuted,
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "音频来自 B 站公开接口，仅供本人账号收藏内容在线收听，请遵守 B 站用户协议。",
+                text = "音频来自 B 站公开接口，仅限本人收藏在线收听，请遵守 B 站用户协议。",
                 style = MaterialTheme.typography.bodySmall,
                 color = BiliMuted.copy(alpha = 0.8f),
             )
@@ -431,46 +389,6 @@ private fun AccountCard(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun SettingSwitch(
-    title: String,
-    description: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-            )
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = BiliMuted,
-            )
-        }
-        Spacer(Modifier.size(12.dp))
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = BiliPink,
-                uncheckedThumbColor = BiliMuted,
-                uncheckedTrackColor = BiliLine,
-                uncheckedBorderColor = Color.Transparent,
-            ),
-        )
     }
 }
 

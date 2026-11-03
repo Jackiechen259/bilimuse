@@ -20,7 +20,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import auth, demo
@@ -782,9 +782,14 @@ async def demo_audio(name: str, request: Request):
 # ------------------------------------------------------------------ 静态页面
 
 
-@app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+@app.get("/", response_class=HTMLResponse)
+async def index() -> HTMLResponse:
+    html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    if state.desktop_shell:
+        # 桌面壳在首帧就带上 is-desktop：否则顶栏会先按网页版排版，
+        # 等 /api/state 返回后再跳成桌面样式，启动瞬间能看到一次闪动。
+        html = html.replace('<html lang="zh-CN">', '<html lang="zh-CN" class="is-desktop">', 1)
+    return HTMLResponse(html)
 
 
 @app.get("/app.js")

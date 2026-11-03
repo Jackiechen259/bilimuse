@@ -1376,6 +1376,8 @@ async function boot() {
     state.user = data.user;
     state.demo = data.demo;
     state.desktop = Boolean(data.desktop);
+    // 桌面壳专属样式（滚动条、顶栏工具条）；网页版保持系统原生与轻量排版
+    document.documentElement.classList.toggle('is-desktop', state.desktop);
     state.settings = data.settings;
     state.version = data.version || state.version;
     syncPreferencesFromSettings(data.settings);
@@ -1468,6 +1470,11 @@ $('search').addEventListener('input', debounce((evt) => {
   loadTracks(title, evt.target.value.trim());
 }, 350));
 
+// 桌面壳：搜索框里的快捷键提示跟随系统习惯（macOS 用 ⌘）
+if (/Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent)) {
+  $('search-kbd').textContent = '⌘ K';
+}
+
 $('audio').addEventListener('timeupdate', () => {
   const audio = $('audio');
   const dur = audio.duration || (state.current && state.current.duration) || 0;
@@ -1509,6 +1516,14 @@ document.addEventListener('keydown', (evt) => {
   }
   if (loginOpen) {
     if (evt.code === 'Escape') { evt.preventDefault(); closeLogin(); }
+    return;
+  }
+
+  // 桌面壳：⌘/Ctrl + K 聚焦收藏夹搜索
+  if (state.desktop && (evt.ctrlKey || evt.metaKey) && evt.code === 'KeyK') {
+    evt.preventDefault();
+    $('search').focus();
+    $('search').select();
     return;
   }
 

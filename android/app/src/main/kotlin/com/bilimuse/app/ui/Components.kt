@@ -26,6 +26,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -179,6 +181,48 @@ fun InfoChip(
             fontSize = 11.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+        )
+    }
+}
+
+@Composable
+fun SettingSwitch(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = BiliMuted,
+            )
+        }
+        Spacer(Modifier.size(12.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = BiliPink,
+                uncheckedThumbColor = BiliMuted,
+                uncheckedTrackColor = BiliLine,
+                uncheckedBorderColor = Color.Transparent,
+            ),
         )
     }
 }

@@ -6,7 +6,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -52,6 +54,7 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
     var showWebLogin by rememberSaveable { mutableStateOf(false) }
     var webLoginPassword by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showFavorites by rememberSaveable { mutableStateOf(false) }
     var showPlayer by rememberSaveable { mutableStateOf(false) }
     var showUpdate by rememberSaveable { mutableStateOf(false) }
     var pendingInstallPath by rememberSaveable { mutableStateOf<String?>(null) }
@@ -145,7 +148,7 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
                         else showSettings = true
                     },
                     onSettingsClick = { showSettings = true },
-                    onManageFolders = { showSettings = true },
+                    onManageFolders = { showFavorites = true },
                     onLoginClick = { showLogin = true },
                     onDemoClick = { viewModel.enterDemo() },
                     onRetry = viewModel::retry,
@@ -186,6 +189,25 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
                 onShuffle = viewModel::setShuffle,
             )
         }
+
+        AnimatedVisibility(
+            visible = showFavorites,
+            enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
+            exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
+        ) {
+            FavoritesScreen(
+                state = library,
+                hiddenFolderIds = settings.hiddenFolderIds,
+                onBack = { showFavorites = false },
+                onFolderHidden = viewModel::setFolderHidden,
+                onShowAllFolders = viewModel::showAllFolders,
+                onLogin = {
+                    showFavorites = false
+                    showLogin = true
+                },
+                onRefresh = viewModel::refreshState,
+            )
+        }
     }
 
     if (showLogin) {
@@ -213,7 +235,6 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
             user = library.user,
             demo = library.demo,
             settings = settings,
-            folders = library.allFolders,
             version = BuildConfig.VERSION_NAME,
             update = update,
             autoCheckUpdates = autoCheckUpdates,
@@ -239,8 +260,6 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
             onChunkSize = viewModel::setChunkSize,
             onLossless = viewModel::setPreferLossless,
             onShowBtrDetails = viewModel::setShowBtrDetails,
-            onFolderHidden = viewModel::setFolderHidden,
-            onShowAllFolders = viewModel::showAllFolders,
             onAutoCheckUpdates = viewModel::setAutoCheckUpdates,
             onCheckUpdate = viewModel::checkForUpdates,
             onOpenUpdate = {

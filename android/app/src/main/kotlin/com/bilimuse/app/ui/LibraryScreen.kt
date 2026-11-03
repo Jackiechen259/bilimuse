@@ -348,7 +348,7 @@ private fun FolderHeader(state: LibraryUiState, onManageFolders: () -> Unit) {
                 onClick = onManageFolders,
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
             ) {
-                Text("管理", color = BiliPink, fontSize = 12.sp)
+                Text("管理收藏夹", color = BiliPink, fontSize = 12.sp)
             }
         }
         if (state.demo) {

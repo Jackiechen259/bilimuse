@@ -19,7 +19,8 @@
 ```
 ┌──────────────────────────── Android App ─────────────────────────────┐
 │  Compose UI                                                          │
-│    LibraryScreen / NowPlayingScreen / LoginDialog / SettingsSheet     │
+│    LibraryScreen / NowPlayingScreen / LoginDialog / SettingsSheet    │
+│    FavoritesScreen（独立的收藏夹管理页）                             │
 │         │                                                            │
 │  MainViewModel  ──→  BiliClient（OkHttp + WBI 签名 + Cookie）          │
 │         │                 └──→ B 站 Web API                          │
@@ -77,7 +78,7 @@ android/
 │   │   ├── AutoLibrary.kt     # Android Auto 收藏夹媒体库树 + 分页
 │   │   ├── PlayerController.kt# UI ↔ MediaController 桥
 │   │   └── BtrDataSource.kt   # Media3 DataSource
-│   ├── ui/                    # Compose 界面、主题、登录/设置/更新弹层
+│   ├── ui/                    # Compose 界面、主题、登录/收藏夹/设置/更新弹层
 │   ├── MainViewModel.kt
 │   └── MainActivity.kt
 └── app/src/test/kotlin/...    # JVM 测试（不需要模拟器）
@@ -307,7 +308,7 @@ APK 资产的选择规则：优先名字带 `universal` 的；其次没有 ABI �
 - 三种登录：原生扫码；账号密码 / 手机验证码（B 站官方登录页 + 极验人机验证）
 - 登录态只写应用私有目录；密码和短信验证码只在官方登录页内处理，App 不保存
 - 收藏夹列表、夹内搜索、分页加载（每页 30 条）
-- 收藏夹显示管理：设置 →「收藏夹」逐项开关，隐藏项不会出现在手机列表和 Android Auto 中；
+- 收藏夹显示管理：从书库的「管理收藏夹」进入独立页面逐项开关，隐藏项不会出现在手机列表和 Android Auto 中；
   只影响本机显示，不会取消 B 站收藏，新收藏夹默认显示
 - 点击播放、队列、上一首/下一首、拖动进度、随机、单曲循环/列表循环
 - 随机播放覆盖**整个收藏夹**：开启随机后会在后台把剩余分页全部拉下来，再补进播放队列，

@@ -70,14 +70,25 @@
 
     <main class="main">
       <header class="topbar">
+        <div class="topbar-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M3.5 7.5A2.5 2.5 0 0 1 6 5h3.2l1.9 2H18a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 19H6a2.5 2.5 0 0 1-2.5-2.5v-9Z" />
+          </svg>
+        </div>
         <div class="titles">
           <h2 id="folder-title">选择一个收藏夹</h2>
           <p class="muted" id="folder-meta">登录后这里会列出你的收藏夹</p>
         </div>
         <div class="top-actions">
-          <div class="search">
-            <input id="search" placeholder="在收藏夹内搜索…" autocomplete="off" />
+          <div class="search" role="search" aria-label="搜索收藏夹">
+            <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10.8" cy="10.8" r="6.8" />
+              <path d="m15.8 15.8 4.2 4.2" />
+            </svg>
+            <input id="search" placeholder="在收藏夹内搜索…" autocomplete="off" aria-label="在收藏夹内搜索" />
+            <kbd class="search-kbd" id="search-kbd" aria-hidden="true">Ctrl K</kbd>
           </div>
+          <span class="topbar-divider" aria-hidden="true"></span>
           <button class="icon-btn" id="settings-btn" title="设置" aria-label="打开设置">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z" />
@@ -213,7 +224,7 @@
                 <div class="setting-row">
                   <div class="setting-copy">
                     <div class="setting-title">无损优先</div>
-                    <div class="setting-desc">优先选择 Hi-Res 或杜比音轨，没有时自动回退到最高码率 AAC。</div>
+                    <div class="setting-desc">Hi-Res / 杜比优先，没有则回退最高码率。</div>
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="prefer-lossless" checked />
@@ -224,7 +235,7 @@
                   <div class="setting-range-head">
                     <div>
                       <div class="setting-title">默认音量</div>
-                      <div class="setting-desc">启动播放器时使用的音量，也会同步更新底部音量条。</div>
+                      <div class="setting-desc">启动时的默认音量。</div>
                     </div>
                     <span class="setting-value" id="settings-volume-value">90%</span>
                   </div>
@@ -242,7 +253,7 @@
                 <div class="setting-row">
                   <div class="setting-copy">
                     <div class="setting-title">自动播放下一首</div>
-                    <div class="setting-desc">当前曲目结束后，按当前列表或随机队列继续播放。</div>
+                    <div class="setting-desc">结束后按列表或随机队列续播。</div>
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="autoplay-next" checked />
@@ -254,7 +265,7 @@
 
             <div class="settings-tip">
               <span class="settings-tip-icon">♫</span>
-              <p>音质由 B 站接口实际返回的音轨决定；拿不到无损时会无感回退，不会影响播放。</p>
+              <p>实际音质取决于 B 站返回的音轨，拿不到无损时无感回退。</p>
             </div>
           </section>
 
@@ -269,7 +280,7 @@
                 <div class="setting-row">
                   <div class="setting-copy">
                     <div class="setting-title">BTR 多线程</div>
-                    <div class="setting-desc">多连接、多 CDN 分段拉流；关闭后使用单连接直通。</div>
+                    <div class="setting-desc">多连接、多 CDN 分段拉流；关闭后单连接直通。</div>
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="btr-toggle" checked />
@@ -280,7 +291,7 @@
                 <div class="setting-block" id="btr-options">
                   <div class="setting-block-head">
                     <div class="setting-title">并发连接数</div>
-                    <div class="setting-desc">线路较快时会自动收敛；遇到慢块再逐步拉满。</div>
+                    <div class="setting-desc">线路快时自动降并发，遇慢块再逐步拉满。</div>
                   </div>
                   <div class="segmented" id="settings-concurrency" role="group" aria-label="并发连接数">
                     <button type="button" data-value="2">2</button>
@@ -296,7 +307,7 @@
                 <div class="setting-block" id="btr-chunk-options">
                   <div class="setting-block-head">
                     <div class="setting-title">分块大小</div>
-                    <div class="setting-desc">较大的块吞吐更稳，较小的块首播响应更快。</div>
+                    <div class="setting-desc">块越大吞吐越稳，越小首播越快。</div>
                   </div>
                   <div class="segmented segmented-wide" id="settings-chunk-size" role="group" aria-label="分块大小">
                     <button type="button" data-value="262144">256 KB</button>
@@ -312,13 +323,13 @@
               <span class="engine-status-dot"></span>
               <div>
                 <div class="engine-status-title" id="engine-hint">BTR 已开启 · 8 并发 · 512 KB/块</div>
-                <div class="engine-status-desc">设置会立即同步到已解析的音轨，无需重新登录。</div>
+                <div class="engine-status-desc">修改后立即生效。</div>
               </div>
             </div>
 
             <div class="settings-tip">
               <span class="settings-tip-icon">⚡</span>
-              <p>默认 8 并发 + 512 KB 适合大多数家庭网络；网络不稳定时可先降到 4 并发。</p>
+              <p>8 并发 + 512 KB 适合多数家庭网络；线路不稳可先降到 4。</p>
             </div>
           </section>
 
@@ -337,7 +348,7 @@
 
             <div class="settings-tip">
               <span class="settings-tip-icon">👁</span>
-              <p>隐藏只影响本机的收藏夹列表，不会取消 B 站收藏；新收藏的收藏夹默认显示。</p>
+              <p>只影响本机列表，不会取消 B 站收藏；新收藏夹默认显示。</p>
             </div>
           </section>
 
@@ -371,14 +382,14 @@
                 <div class="setting-row">
                   <div class="setting-copy">
                     <div class="setting-title">扫码登录</div>
-                    <div class="setting-desc">使用 B 站手机客户端扫码，网页版与桌面版均可用。</div>
+                    <div class="setting-desc">用 B 站手机客户端扫码，网页版与桌面版通用。</div>
                   </div>
                   <span class="method-tag">二维码</span>
                 </div>
                 <div class="setting-row">
                   <div class="setting-copy">
                     <div class="setting-title">官方窗口登录</div>
-                    <div class="setting-desc">账号密码或短信验证码在 B 站官方页面完成，本应用不接触密码。</div>
+                    <div class="setting-desc">在 B 站官方页面完成，本应用不接触密码。</div>
                   </div>
                   <span class="method-tag" id="settings-desktop-login-tag">桌面版可用</span>
                 </div>
@@ -387,7 +398,7 @@
 
             <div class="settings-tip">
               <span class="settings-tip-icon">🔒</span>
-              <p>登录态只保存在本机配置目录中（权限 0600），不会上传到任何第三方服务器。</p>
+              <p>登录态只存本机配置目录（0600），不上传任何第三方服务器。</p>
             </div>
           </section>
 
@@ -471,8 +482,8 @@
         <div class="login-window-icon">🔐</div>
         <p id="login-window-status">正在打开 B 站官方登录窗口…</p>
         <p class="login-window-hint muted small">
-          账号密码、短信验证码和人机验证都在 B 站官方页面里完成；
-          本应用只读取登录 cookie，不会保存密码。
+          账号密码、验证码与人机验证都在官方页面完成；
+          只读取登录 cookie，不保存密码。
         </p>
         <div class="login-window-actions">
           <button class="ghost hidden" id="login-window-retry">重试</button>
