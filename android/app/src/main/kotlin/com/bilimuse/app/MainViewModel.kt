@@ -370,6 +370,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         applyFolderVisibility(_library.value.allFolders)
     }
 
+    /** 一键全不选：隐藏全部收藏夹，书库会变成空列表（可再一键全选恢复）。 */
+    fun hideAllFolders() {
+        val folders = _library.value.allFolders
+        if (folders.isEmpty()) return
+        val ids = folders.map { it.id }.toSet()
+        if (settingsStore.settings.value.hiddenFolderIds.containsAll(ids)) return
+        settingsStore.hideAllFolders(ids)
+        applyFolderVisibility(folders)
+        _messages.tryEmit("已隐藏全部收藏夹，可在收藏夹管理中一键恢复")
+    }
+
     fun selectFolder(id: Long, title: String) {
         searchJob?.cancel()
         tracksJob?.cancel()

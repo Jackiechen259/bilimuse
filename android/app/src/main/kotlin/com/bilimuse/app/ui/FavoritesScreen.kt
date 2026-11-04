@@ -32,7 +32,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -57,6 +56,7 @@ fun FavoritesScreen(
     onBack: () -> Unit,
     onFolderHidden: (Long, Boolean) -> Unit,
     onShowAllFolders: () -> Unit,
+    onHideAllFolders: () -> Unit,
     onLogin: () -> Unit,
     onRefresh: () -> Unit,
 ) {
@@ -99,6 +99,7 @@ fun FavoritesScreen(
                                 hidden = hiddenCount,
                                 allHidden = hiddenCount == folders.size,
                                 onShowAllFolders = onShowAllFolders,
+                                onHideAllFolders = onHideAllFolders,
                             )
                         }
                         item {
@@ -176,6 +177,7 @@ private fun FavoritesSummary(
     hidden: Int,
     allHidden: Boolean,
     onShowAllFolders: () -> Unit,
+    onHideAllFolders: () -> Unit,
 ) {
     Surface(
         color = BiliPanel2,
@@ -184,29 +186,17 @@ private fun FavoritesSummary(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("共 $total 个收藏夹", style = MaterialTheme.typography.titleSmall)
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        text = if (hidden == 0) {
-                            "全部显示中"
-                        } else {
-                            "显示 ${total - hidden} 个 · 隐藏 $hidden 个"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (hidden > 0) BiliPink else BiliMuted,
-                    )
-                }
-                if (hidden > 0) {
-                    TextButton(
-                        onClick = onShowAllFolders,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                    ) {
-                        Text("全部显示", color = BiliPink, fontSize = 12.sp)
-                    }
-                }
-            }
+            Text("共 $total 个收藏夹", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = if (hidden == 0) {
+                    "全部显示中"
+                } else {
+                    "显示 ${total - hidden} 个 · 隐藏 $hidden 个"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (hidden > 0) BiliPink else BiliMuted,
+            )
             Spacer(Modifier.height(10.dp))
             Text(
                 text = "关闭开关后，该收藏夹不会出现在列表和 Android Auto 里；" +
@@ -214,8 +204,27 @@ private fun FavoritesSummary(
                 style = MaterialTheme.typography.bodySmall,
                 color = BiliMuted,
             )
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                BulkFolderButton(
+                    label = "全选",
+                    enabled = hidden > 0,
+                    onClick = onShowAllFolders,
+                    modifier = Modifier.weight(1f),
+                )
+                BulkFolderButton(
+                    label = "全不选",
+                    enabled = hidden < total,
+                    onClick = onHideAllFolders,
+                    modifier = Modifier.weight(1f),
+                    danger = true,
+                )
+            }
             if (allHidden) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 Text(
                     text = "所有收藏夹都已隐藏，书库现在是空列表。",
                     style = MaterialTheme.typography.bodySmall,
@@ -224,6 +233,37 @@ private fun FavoritesSummary(
                 )
             }
         }
+    }
+}
+
+/** 收藏夹批量开关：全选 = 全部显示，全不选 = 全部隐藏。 */
+@Composable
+private fun BulkFolderButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    danger: Boolean = false,
+) {
+    val accent = if (danger) BiliDanger else BiliPink
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (enabled) accent.copy(alpha = 0.45f) else BiliLine,
+        ),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = if (danger) BiliDanger else BiliText,
+            disabledContentColor = BiliMuted.copy(alpha = 0.45f),
+            containerColor = Color.Transparent,
+            disabledContainerColor = Color.Transparent,
+        ),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+    ) {
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium)
     }
 }
 

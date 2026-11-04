@@ -201,6 +201,7 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
                 onBack = { showFavorites = false },
                 onFolderHidden = viewModel::setFolderHidden,
                 onShowAllFolders = viewModel::showAllFolders,
+                onHideAllFolders = viewModel::hideAllFolders,
                 onLogin = {
                     showFavorites = false
                     showLogin = true

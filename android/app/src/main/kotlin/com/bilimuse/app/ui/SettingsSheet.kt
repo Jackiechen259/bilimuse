@@ -261,13 +261,7 @@ fun SettingsSheet(
                 checked = autoCheckUpdates,
                 onCheckedChange = onAutoCheckUpdates,
             )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "把 B 站收藏夹变成私人音乐库，引擎、登录态与播放缓存都只在本机。",
-                style = MaterialTheme.typography.bodySmall,
-                color = BiliMuted,
-            )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
             Text(
                 text = "音频来自 B 站公开接口，仅限本人收藏在线收听，请遵守 B 站用户协议。",
                 style = MaterialTheme.typography.bodySmall,

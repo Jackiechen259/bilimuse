@@ -46,6 +46,10 @@ class SettingsStore(context: Context) {
 
     fun showAllFolders(): EngineSettings = update { it.copy(hiddenFolderIds = emptySet()) }
 
+    /** 一键全不选：把当前可见的收藏夹全部隐藏。 */
+    fun hideAllFolders(folderIds: Collection<Long>): EngineSettings =
+        update { it.copy(hiddenFolderIds = folderIds.toSet()) }
+
     private fun restore(): EngineSettings = EngineSettings(
         btrEnabled = prefs.getBoolean(KEY_BTR, true),
         concurrency = prefs.getInt(KEY_CONCURRENCY, 8),
