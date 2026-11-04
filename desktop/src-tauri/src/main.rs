@@ -24,25 +24,40 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use tauri::{Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    window::Color, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+};
 
 const READY_PREFIX: &str = "BILIMUSE_PORT=";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(40);
 const LOG_MAX_BYTES: u64 = 2 * 1024 * 1024;
+
+/// 窗口底色跟墨色主题的网页 `--bg` 保持一致，避免首帧前闪一下白底。
+const WINDOW_BG: Color = Color(11, 11, 12, 255);
 
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            // 窗口自己建，这样能先给用户一个启动页，而不是等 Python 起来才见窗口
-            let window =
+            // 窗口自己建，这样能先给用户一个启动页，而不是等 Python 起来才见窗口。
+            // Windows 上用无边框窗口：标题栏交给页面顶栏兼任（拖动区域 + 右侧窗口按钮）；
+            // macOS / Linux 保留系统标题栏，避免丢掉 traffic light 和桌面环境的窗口手势。
+            #[allow(unused_mut)]
+            let mut builder =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                     .title("BiliMuse")
                     .inner_size(1180.0, 760.0)
                     .min_inner_size(880.0, 560.0)
-                    .center()
-                    .build()?;
+                    .background_color(WINDOW_BG)
+                    .center();
+            #[cfg(windows)]
+            {
+                builder = builder.decorations(false).shadow(true);
+            }
+            let window = builder.build()?;
+
+            polish_window(&window);
 
             let demo = std::env::args().any(|arg| arg == "--demo")
                 || std::env::var("BILIMUSE_DEMO").as_deref() == Ok("1");
@@ -62,6 +77,51 @@ fn main() {
         }
     });
 }
+
+/// 无边框窗口在 Windows 上的收尾：去掉 shadow 自带的 1px 白边，换成和界面
+/// 一致的深色描边，并显式要求 Windows 11 的圆角（旧系统会忽略这两个属性）。
+#[cfg(windows)]
+fn polish_window(window: &WebviewWindow) {
+    use std::ffi::c_void;
+
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: isize,
+            attribute: u32,
+            value: *const c_void,
+            size: u32,
+        ) -> i32;
+    }
+
+    const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+    const DWMWA_BORDER_COLOR: u32 = 34;
+    const DWMWCP_ROUND: u32 = 2;
+    // COLORREF 是 0x00BBGGRR；对应墨色主题 --line 叠在 #0b0b0c 上的 #292929
+    const BORDER_COLOR: u32 = 0x0029_2929;
+
+    let Ok(hwnd) = window.hwnd() else { return };
+    let hwnd = hwnd.0 as isize;
+    unsafe {
+        let corner = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &corner as *const u32 as *const c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+        let border = BORDER_COLOR;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            &border as *const u32 as *const c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn polish_window(_window: &WebviewWindow) {}
 
 // ---------------------------------------------------------------- 边车进程
 
