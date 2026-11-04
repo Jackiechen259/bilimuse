@@ -10,6 +10,8 @@ import struct
 import wave
 from pathlib import Path
 
+from .demo_covers import NEON_CITY, NIGHT_FLIGHT, SEA_SIGNAL
+
 SAMPLE_RATE = 44100
 DURATION = 45  # 秒
 DEMO_RATE = 320_000  # 每连接限速，字节/秒（制造出"单线程很慢"的真实感）
@@ -24,7 +26,7 @@ DEMO_TRACKS = [
         "title": "夜航星 (Demo)",
         "upper": "BiliMuse",
         "duration": DURATION,
-        "cover": "",
+        "cover": NIGHT_FLIGHT,
         "intro": "多线程加载演示：45 秒合成的琶音音轨",
         "ctime": 0,
         "attr": 0,
@@ -36,7 +38,7 @@ DEMO_TRACKS = [
         "title": "城市霓虹 (Demo)",
         "upper": "BiliMuse",
         "duration": DURATION,
-        "cover": "",
+        "cover": NEON_CITY,
         "intro": "低频铺底 + 和弦，用于测试进度条拖动（Range 请求）",
         "ctime": 0,
         "attr": 0,
@@ -48,7 +50,7 @@ DEMO_TRACKS = [
         "title": "海边的信号 (Demo)",
         "upper": "BiliMuse",
         "duration": DURATION,
-        "cover": "",
+        "cover": SEA_SIGNAL,
         "intro": "缓慢的环境音，测试连续播放",
         "ctime": 0,
         "attr": 0,

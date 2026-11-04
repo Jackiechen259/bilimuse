@@ -14,6 +14,7 @@ from pathlib import Path
 
 APP_NAME = "bilimuse"
 VERSION = "0.2.2"
+THEMES = ("ink", "paper", "cream")
 
 
 def _default_config_dir() -> Path:
@@ -107,10 +108,15 @@ class Settings:
     # 收藏夹显示：存被隐藏的收藏夹 ID，新收藏夹默认可见
     hidden_folders: list[int] = field(default_factory=list)
 
+    # 界面风格：墨 / 纸 / 米。None = 还没选过，前端会沿用本机缓存并回写。
+    theme: str | None = None
+
     def clamp(self) -> None:
         self.concurrency = max(1, min(self.concurrency, 64))
         self.chunk_size = max(64 * 1024, min(self.chunk_size, 8 * 1024 * 1024))
         self.volume = max(0.0, min(float(self.volume), 1.0))
+        if self.theme not in THEMES:
+            self.theme = None
         self.hidden_folders = sorted(
             {
                 int(fid)
@@ -129,6 +135,7 @@ class Settings:
             "volume": round(self.volume, 2),
             "autoplay_next": self.autoplay_next,
             "hidden_folders": list(self.hidden_folders),
+            "theme": self.theme,
         }
 
     def load(self) -> None:
@@ -156,6 +163,8 @@ class Settings:
             self.volume = float(raw["volume"])
         if isinstance(raw.get("autoplay_next"), bool):
             self.autoplay_next = raw["autoplay_next"]
+        if isinstance(raw.get("theme"), str) and raw["theme"] in THEMES:
+            self.theme = raw["theme"]
         if isinstance(raw.get("hidden_folders"), list):
             self.hidden_folders = [
                 fid

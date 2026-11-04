@@ -3,22 +3,40 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#0b0d12" />
+  <meta name="theme-color" content="#0b0b0c" id="theme-color" />
+  <!-- B 站图片 CDN 会拒绝来自 127.0.0.1 的 Referer（403）；封面 / 头像都是 <img>/background-image，
+       统一不发送 Referer。页面没有任何外链，不影响其他请求。 -->
+  <meta name="referrer" content="no-referrer" />
+  <!-- 封面从 B 站图片 CDN 拉取；提前建连，避免每首歌都重新握手 -->
+  <link rel="preconnect" href="https://i0.hdslb.com" />
+  <link rel="preconnect" href="https://i1.hdslb.com" />
+  <link rel="preconnect" href="https://i2.hdslb.com" />
   <title>BiliMuse · 收藏夹音乐库</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="icon" href="/favicon.ico" sizes="any" />
+  <!-- 主题在样式表之前落到 <html> 上，避免刷新时闪一下默认配色。
+       服务端已经注入 data-theme（桌面版端口随机，靠 settings.json）时以它为准。 -->
+  <script>
+    (function () {
+      var preset = document.documentElement.getAttribute('data-theme');
+      if (preset === 'ink' || preset === 'paper' || preset === 'cream') return;
+      var theme = 'ink';
+      try {
+        var saved = localStorage.getItem('bilimuse.theme');
+        if (saved === 'ink' || saved === 'paper' || saved === 'cream') theme = saved;
+      } catch (_) { /* 无痕 / 受限 webview：用默认主题 */ }
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <div class="app">
+  <div class="app" id="app">
     <aside class="sidebar">
-      <div class="brand">
-        <div class="logo">
-          <svg viewBox="0 0 108 108" aria-hidden="true">
-            <circle cx="54" cy="54" r="31.5" fill="#0B0D12" />
-            <circle cx="54" cy="54" r="27" fill="none" stroke="#FFFFFF" stroke-opacity="0.09" stroke-width="0.65" />
-            <circle cx="54" cy="54" r="23.6" fill="none" stroke="#FFFFFF" stroke-opacity="0.09" stroke-width="0.65" />
-            <g transform="translate(-0.5 1)" fill="#F5F7FF">
+      <div class="brand" data-tauri-drag-region="deep">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 108 108">
+            <g fill="currentColor">
               <ellipse cx="43.5" cy="66" rx="9.4" ry="7.1" transform="rotate(-20 43.5 66)" />
               <ellipse cx="64" cy="62" rx="9.4" ry="7.1" transform="rotate(-20 64 62)" />
               <rect x="48.4" y="34" width="5.2" height="32" rx="2.6" />
@@ -27,7 +45,7 @@
             </g>
           </svg>
         </div>
-        <div>
+        <div class="brand-copy">
           <h1>BiliMuse</h1>
           <p>把收藏夹变成歌单</p>
         </div>
@@ -39,43 +57,46 @@
           <div id="account-name">未登录</div>
           <div class="muted small" id="account-hint">扫码登录后读取你的收藏夹</div>
         </div>
-        <button class="ghost" id="login-btn">登录</button>
+        <button class="ghost small-btn" id="login-btn">登录</button>
       </div>
 
-      <div class="section-title">
-        <span class="section-heading">收藏夹<span id="folder-count"></span></span>
-        <button class="section-action" id="manage-folders" title="选择显示哪些收藏夹">管理</button>
+      <div class="side-section">
+        <div class="side-label">
+          <span>收藏夹<span class="side-count" id="folder-count"></span></span>
+          <button class="link-btn" id="manage-folders" title="选择显示哪些收藏夹">管理</button>
+        </div>
+        <nav class="folders" id="folders">
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
+        </nav>
       </div>
-      <nav class="folders" id="folders">
-        <div class="skeleton"></div>
-        <div class="skeleton"></div>
-      </nav>
 
-      <div class="spacer"></div>
-
-      <button class="settings-entry" id="open-settings" title="打开设置">
-        <span class="settings-entry-icon">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z" />
-            <path d="M19.4 13.5c.04-.5.04-1 0-1.5l1.7-1.33a.8.8 0 0 0 .19-1.02l-1.62-2.8a.8.8 0 0 0-.97-.35l-2 .8a7.8 7.8 0 0 0-1.3-.75l-.3-2.13a.8.8 0 0 0-.8-.68h-3.23a.8.8 0 0 0-.8.68l-.3 2.13c-.46.2-.9.46-1.3.75l-2-.8a.8.8 0 0 0-.97.35l-1.62 2.8a.8.8 0 0 0 .19 1.02l1.7 1.33a7.9 7.9 0 0 0 0 1.5l-1.7 1.33a.8.8 0 0 0-.19 1.02l1.62 2.8c.2.35.61.5.97.35l2-.8c.4.3.84.55 1.3.75l.3 2.13c.06.39.4.68.8.68h3.23c.4 0 .74-.29.8-.68l.3-2.13c.46-.2.9-.46 1.3-.75l2 .8c.36.15.77 0 .97-.35l1.62-2.8a.8.8 0 0 0-.19-1.02l-1.7-1.33Z" />
-          </svg>
-        </span>
-        <span class="settings-entry-copy">
-          <span class="settings-entry-title">设置</span>
-          <span class="settings-entry-summary" id="engine-summary">BTR 多线程 · 8 并发</span>
-        </span>
-        <span class="settings-entry-chevron">›</span>
-      </button>
+      <div class="sidebar-foot">
+        <div class="theme-row">
+          <span class="theme-label">界面风格</span>
+          <div class="theme-switch" role="group" aria-label="界面风格">
+            <button type="button" class="theme-opt" data-theme-choice="ink" aria-pressed="true" title="黑白 · 墨">
+              <span class="theme-dot" aria-hidden="true"></span>
+              <span class="theme-name">墨</span>
+            </button>
+            <button type="button" class="theme-opt" data-theme-choice="paper" aria-pressed="false" title="黑白 · 纸">
+              <span class="theme-dot" aria-hidden="true"></span>
+              <span class="theme-name">纸</span>
+            </button>
+            <button type="button" class="theme-opt" data-theme-choice="cream" aria-pressed="false" title="米色 · 暖调">
+              <span class="theme-dot" aria-hidden="true"></span>
+              <span class="theme-name">米</span>
+            </button>
+          </div>
+        </div>
+        <p class="sidebar-note"><i class="status-dot" aria-hidden="true"></i>本地播放 · 收藏夹只读</p>
+      </div>
     </aside>
 
     <main class="main">
-      <header class="topbar">
-        <div class="topbar-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24">
-            <path d="M3.5 7.5A2.5 2.5 0 0 1 6 5h3.2l1.9 2H18a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 19H6a2.5 2.5 0 0 1-2.5-2.5v-9Z" />
-          </svg>
-        </div>
+      <header class="topbar" data-tauri-drag-region="deep">
         <div class="titles">
+          <span class="eyebrow">Library · 音乐库</span>
           <h2 id="folder-title">选择一个收藏夹</h2>
           <p class="muted" id="folder-meta">登录后这里会列出你的收藏夹</p>
         </div>
@@ -88,45 +109,102 @@
             <input id="search" placeholder="在收藏夹内搜索…" autocomplete="off" aria-label="在收藏夹内搜索" />
             <kbd class="search-kbd" id="search-kbd" aria-hidden="true">Ctrl K</kbd>
           </div>
-          <span class="topbar-divider" aria-hidden="true"></span>
           <button class="icon-btn" id="settings-btn" title="设置" aria-label="打开设置">
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z" />
-              <path d="M19.4 13.5c.04-.5.04-1 0-1.5l1.7-1.33a.8.8 0 0 0 .19-1.02l-1.62-2.8a.8.8 0 0 0-.97-.35l-2 .8a7.8 7.8 0 0 0-1.3-.75l-.3-2.13a.8.8 0 0 0-.8-.68h-3.23a.8.8 0 0 0-.8.68l-.3 2.13c-.46.2-.9.46-1.3.75l-2-.8a.8.8 0 0 0-.97.35l-1.62 2.8a.8.8 0 0 0 .19 1.02l1.7 1.33a7.9 7.9 0 0 0 0 1.5l-1.7 1.33a.8.8 0 0 0-.19 1.02l1.62 2.8c.2.35.61.5.97.35l2-.8c.4.3.84.55 1.3.75l.3 2.13c.06.39.4.68.8.68h3.23c.4 0 .74-.29.8-.68l.3-2.13c.46-.2.9-.46 1.3-.75l2 .8c.36.15.77 0 .97-.35l1.62-2.8a.8.8 0 0 0-.19-1.02l-1.7-1.33Z" />
+              <circle cx="12" cy="12" r="3.2" />
+              <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.5 19.3a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.13 15a1.7 1.7 0 0 0-1.55-1H2.4a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.88.34H8.5a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.88V10a1.7 1.7 0 0 0 1.55 1h.09a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z" />
             </svg>
           </button>
+          <div class="window-controls" id="window-controls" role="group" aria-label="窗口控制">
+            <span class="window-controls-divider" aria-hidden="true"></span>
+            <button class="window-btn" id="win-min" data-win="min" title="最小化" aria-label="最小化">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+            </button>
+            <button class="window-btn" id="win-max" data-win="max" title="最大化" aria-label="最大化">
+              <svg class="glyph-max" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="5" y="5" width="14" height="14" rx="1.8" />
+              </svg>
+              <svg class="glyph-restore" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 5.5h8.7a1.8 1.8 0 0 1 1.8 1.8v8.7" />
+                <rect x="5.5" y="8" width="11" height="11" rx="1.8" />
+              </svg>
+            </button>
+            <button class="window-btn window-btn-close" id="win-close" data-win="close" title="关闭" aria-label="关闭">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+            </button>
+          </div>
         </div>
       </header>
 
       <section class="list-head">
-        <span>#</span><span>标题</span><span>UP主</span><span>时长</span>
+        <span>#</span><span>曲目</span><span>时长</span>
       </section>
 
       <section id="tracks" class="tracks"></section>
       <div id="empty" class="empty hidden">
-        <div class="empty-icon">🎧</div>
+        <div class="empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="9" />
+            <circle cx="12" cy="12" r="2.4" />
+            <path d="M12 3v6.6M12 14.4V21" />
+          </svg>
+        </div>
         <p id="empty-text">还没有内容</p>
         <button class="ghost hidden" id="empty-manage">管理收藏夹</button>
       </div>
     </main>
   </div>
 
-  <footer class="player">
-    <div class="now">
+  <footer class="player" id="player">
+    <div class="now" id="now" title="打开播放详情">
       <div class="now-cover" id="now-cover">♪</div>
       <div class="now-text">
         <div id="now-title">未在播放</div>
         <div class="muted small" id="now-sub">选择一首开始</div>
       </div>
       <div class="badge" id="quality">—</div>
+      <button class="now-expand" id="open-now-playing" title="播放详情（F）" aria-label="打开播放详情">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M14 4.5h5.5V10" />
+          <path d="M19.5 4.5 12 12" />
+          <path d="M10 19.5H4.5V14" />
+          <path d="M4.5 19.5 12 12" />
+        </svg>
+      </button>
     </div>
 
     <div class="controls">
       <div class="buttons">
-        <button id="shuffle" title="随机播放（整个收藏夹）" aria-pressed="false">🔀</button>
-        <button id="prev" title="上一首">⏮</button>
-        <button id="play" class="play" title="播放 / 暂停">▶</button>
-        <button id="next" title="下一首">⏭</button>
+        <button id="shuffle" title="随机播放（整个收藏夹）" aria-label="随机播放" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M16 3h5v5" />
+            <path d="M4 20 21 3" />
+            <path d="M21 16v5h-5" />
+            <path d="m15 15 6 6" />
+            <path d="m4 4 5 5" />
+          </svg>
+        </button>
+        <button id="prev" title="上一首" aria-label="上一首">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 5v14" />
+            <path d="M19 6.4v11.2a1 1 0 0 1-1.55.83l-9.1-5.6a1 1 0 0 1 0-1.66l9.1-5.6A1 1 0 0 1 19 6.4Z" />
+          </svg>
+        </button>
+        <button id="play" class="play" title="播放 / 暂停" aria-label="播放 / 暂停">
+          <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 5.3v13.4a1 1 0 0 0 1.53.85l10.4-6.7a1 1 0 0 0 0-1.7L9.53 4.45A1 1 0 0 0 8 5.3Z" />
+          </svg>
+          <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="7" y="4.8" width="3.6" height="14.4" rx="1.2" />
+            <rect x="13.4" y="4.8" width="3.6" height="14.4" rx="1.2" />
+          </svg>
+        </button>
+        <button id="next" title="下一首" aria-label="下一首">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 5v14" />
+            <path d="M5 6.4v11.2a1 1 0 0 0 1.55.83l9.1-5.6a1 1 0 0 0 0-1.66l-9.1-5.6A1 1 0 0 0 5 6.4Z" />
+          </svg>
+        </button>
       </div>
       <div class="shuffle-hint hidden" id="shuffle-hint"></div>
       <div class="seek-row">
@@ -143,24 +221,333 @@
     <div class="side">
       <div class="stats" id="stats">BTR 待机</div>
       <div class="volume">
-        <span>🔊</span>
-        <input id="volume" type="range" min="0" max="1" step="0.01" value="0.9" />
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4.5 9.5h3l4.2-3.7v12.4l-4.2-3.7h-3Z" />
+          <path d="M15 9.3a4.2 4.2 0 0 1 0 5.4" />
+          <path d="M17.6 6.8a8 8 0 0 1 0 10.4" />
+        </svg>
+        <input id="volume" type="range" min="0" max="1" step="0.01" value="0.9" aria-label="音量" />
       </div>
     </div>
   </footer>
+
+  <!-- 播放详情：一屏装下的沉浸式播放器。左侧封面 + 走带，右侧播放队列，
+       BTR 传输详情收进底部抽屉，不再和一个大仪表盘抢注意力。 -->
+  <section class="now-playing hidden" id="now-playing" role="dialog" aria-modal="true" aria-labelledby="np-title">
+    <div class="np-ambient" id="np-ambient" aria-hidden="true"></div>
+
+    <header class="np-header" data-tauri-drag-region="deep">
+      <div class="np-header-left">
+        <button class="np-back" id="np-close" type="button" title="返回收藏夹（Esc）" aria-label="返回收藏夹">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.5 9.5 5.5 5.5 5.5-5.5" /></svg>
+        </button>
+        <div class="np-heading">
+          <span class="np-heading-label">正在播放</span>
+          <span class="np-heading-sep" aria-hidden="true">/</span>
+          <span class="np-heading-sub" id="np-header-sub">收藏夹</span>
+        </div>
+      </div>
+      <div class="np-header-right">
+        <button class="np-tool np-queue-toggle" id="np-queue-toggle" type="button" aria-expanded="true" aria-controls="np-queue-rail" title="播放队列（Q）">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h11M4 12h11M4 17h7" />
+            <path d="M18.5 12v7.2a1.8 1.8 0 1 1-1.6-1.78" />
+          </svg>
+          <span>队列</span>
+        </button>
+        <div class="theme-switch theme-switch-compact" role="group" aria-label="界面风格">
+          <button type="button" class="theme-opt" data-theme-choice="ink" aria-pressed="true" title="黑白 · 墨">
+            <span class="theme-dot" aria-hidden="true"></span><span class="visually-hidden">黑白深色</span>
+          </button>
+          <button type="button" class="theme-opt" data-theme-choice="paper" aria-pressed="false" title="黑白 · 纸">
+            <span class="theme-dot" aria-hidden="true"></span><span class="visually-hidden">黑白浅色</span>
+          </button>
+          <button type="button" class="theme-opt" data-theme-choice="cream" aria-pressed="false" title="米色 · 暖调">
+            <span class="theme-dot" aria-hidden="true"></span><span class="visually-hidden">米色</span>
+          </button>
+        </div>
+        <button class="np-tool hidden" id="np-copy" type="button" title="复制 B 站链接" aria-label="复制 B 站链接">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M10.2 13.8a3.6 3.6 0 0 0 5.1 0l3-3a3.6 3.6 0 0 0-5.1-5.1l-1.4 1.4" />
+            <path d="M13.8 10.2a3.6 3.6 0 0 0-5.1 0l-3 3a3.6 3.6 0 0 0 5.1 5.1l1.4-1.4" />
+          </svg>
+        </button>
+        <button class="np-tool" id="np-settings" type="button" title="播放引擎设置" aria-label="打开设置">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="3.2" />
+            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.5 19.3a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.13 15a1.7 1.7 0 0 0-1.55-1H2.4a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.88.34H8.5a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.88V10a1.7 1.7 0 0 0 1.55 1h.09a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z" />
+          </svg>
+        </button>
+        <div class="window-controls" id="np-window-controls" role="group" aria-label="窗口控制">
+          <span class="window-controls-divider" aria-hidden="true"></span>
+          <button class="window-btn" id="np-win-min" data-win="min" title="最小化" aria-label="最小化">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+          </button>
+          <button class="window-btn" id="np-win-max" data-win="max" title="最大化" aria-label="最大化">
+            <svg class="glyph-max" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="5" y="5" width="14" height="14" rx="1.8" />
+            </svg>
+            <svg class="glyph-restore" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 5.5h8.7a1.8 1.8 0 0 1 1.8 1.8v8.7" />
+              <rect x="5.5" y="8" width="11" height="11" rx="1.8" />
+            </svg>
+          </button>
+          <button class="window-btn window-btn-close" id="np-win-close" data-win="close" title="关闭" aria-label="关闭">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <button class="np-queue-scrim" id="np-queue-scrim" type="button" tabindex="-1" aria-label="关闭播放队列"></button>
+
+    <div class="np-main">
+      <section class="np-deck">
+        <div class="np-art" id="np-art" aria-hidden="true">
+          <div class="np-art-cover is-empty" id="np-art-cover">
+            <div class="np-art-grooves"></div>
+            <svg class="np-art-mark" viewBox="0 0 108 108" aria-hidden="true">
+              <g fill="currentColor">
+                <ellipse cx="43.5" cy="66" rx="9.4" ry="7.1" transform="rotate(-20 43.5 66)" />
+                <ellipse cx="64" cy="62" rx="9.4" ry="7.1" transform="rotate(-20 64 62)" />
+                <rect x="48.4" y="34" width="5.2" height="32" rx="2.6" />
+                <rect x="69" y="30.2" width="5.2" height="32" rx="2.6" />
+                <path d="M48.4 34 L74.2 30.2 L74.2 37 L48.4 40.8 Z" />
+              </g>
+            </svg>
+            <div class="np-art-play">
+              <svg class="np-i-play" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 5.3v13.4a1 1 0 0 0 1.53.85l10.4-6.7a1 1 0 0 0 0-1.7L9.53 4.45A1 1 0 0 0 8 5.3Z" />
+              </svg>
+              <svg class="np-i-pause" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="7" y="4.8" width="3.6" height="14.4" rx="1.3" />
+                <rect x="13.4" y="4.8" width="3.6" height="14.4" rx="1.3" />
+              </svg>
+            </div>
+            <div class="np-art-eq" id="np-art-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+
+        <div class="np-console">
+          <div class="np-trackline">
+            <div class="np-eyebrow">
+              <span class="np-state">
+                <span class="np-state-dot" id="np-state-dot"></span>
+                <span id="np-state-text">待机</span>
+                <span class="np-state-sep">·</span>
+                <span class="np-state-index" id="np-state-index">—</span>
+              </span>
+              <span class="np-source" id="np-source">选择一首开始</span>
+            </div>
+            <h1 class="np-title" id="np-title">未在播放</h1>
+            <p class="np-artist">
+              <span class="np-artist-key">UP 主</span>
+              <span class="np-artist-name" id="np-artist">—</span>
+            </p>
+            <div class="np-chips" id="np-chips"></div>
+            <p class="np-intro" id="np-intro"></p>
+          </div>
+
+          <div class="np-progress">
+            <div class="np-seek" id="np-seek" role="slider" tabindex="0" aria-label="播放进度"
+              aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="np-seek-buf" id="np-seek-buf"></div>
+              <div class="np-seek-engine" id="np-seek-engine"></div>
+              <div class="np-seek-fill" id="np-seek-fill"></div>
+              <div class="np-seek-knob" id="np-seek-knob"></div>
+              <div class="np-seek-tip" id="np-seek-tip">0:00</div>
+            </div>
+            <div class="np-times">
+              <span class="np-time" id="np-cur">0:00</span>
+              <span class="np-time" id="np-dur">0:00</span>
+            </div>
+          </div>
+
+          <div class="np-transport">
+            <button class="np-ctrl" id="np-shuffle" type="button" title="随机播放（S）" aria-label="随机播放" aria-pressed="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M16 3h5v5" />
+                <path d="M4 20 21 3" />
+                <path d="M21 16v5h-5" />
+                <path d="m15 15 6 6" />
+                <path d="m4 4 5 5" />
+              </svg>
+            </button>
+            <button class="np-ctrl np-ctrl-step" id="np-prev" type="button" title="上一首（P）" aria-label="上一首">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6.2 5.6v12.8" />
+                <path d="M19 6.3v11.4a1 1 0 0 1-1.55.83l-9.1-5.7a1 1 0 0 1 0-1.66l9.1-5.7A1 1 0 0 1 19 6.3Z" />
+              </svg>
+            </button>
+            <button class="np-play" id="np-play" type="button" title="播放 / 暂停（Space）" aria-label="播放">
+              <svg class="np-i-play" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 5.3v13.4a1 1 0 0 0 1.53.85l10.4-6.7a1 1 0 0 0 0-1.7L9.53 4.45A1 1 0 0 0 8 5.3Z" />
+              </svg>
+              <svg class="np-i-pause" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="7" y="4.8" width="3.6" height="14.4" rx="1.3" />
+                <rect x="13.4" y="4.8" width="3.6" height="14.4" rx="1.3" />
+              </svg>
+            </button>
+            <button class="np-ctrl np-ctrl-step" id="np-next" type="button" title="下一首（N）" aria-label="下一首">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M17.8 5.6v12.8" />
+                <path d="M5 6.3v11.4a1 1 0 0 0 1.55.83l9.1-5.7a1 1 0 0 0 0-1.66l-9.1-5.7A1 1 0 0 0 5 6.3Z" />
+              </svg>
+            </button>
+          </div>
+
+          <div class="np-foot">
+            <button class="np-engine-pill" id="np-engine-pill" type="button" aria-expanded="false" aria-controls="np-engine-layer" title="BTR 传输详情">
+              <span class="np-dock-tag" id="np-dock-tag">BTR</span>
+              <span class="np-dock-engine" id="np-dock-engine">待机</span>
+              <i class="np-live-dot" id="np-tab-live" aria-hidden="true"></i>
+              <svg class="np-pill-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 14 5-5 5 5" /></svg>
+            </button>
+            <div class="np-volume">
+              <svg class="np-vol-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4.5 9.5h3l4.2-3.7v12.4l-4.2-3.7h-3Z" />
+                <path d="M15 9.3a4.2 4.2 0 0 1 0 5.4" />
+                <path d="M17.6 6.8a8 8 0 0 1 0 10.4" />
+              </svg>
+              <input class="np-volume-input" id="np-volume" type="range" min="0" max="1" step="0.01" value="0.9" aria-label="音量" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="np-queue-rail" id="np-queue-rail" aria-label="播放队列">
+        <div class="np-queue-head">
+          <div class="np-queue-heading">
+            <span class="np-queue-title">播放队列</span>
+            <span class="np-queue-count" id="np-queue-count">—</span>
+          </div>
+          <button class="np-queue-close" id="np-queue-close" type="button" title="收起队列" aria-label="收起队列">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+          </button>
+        </div>
+        <div class="np-queue-meta">
+          <span class="np-queue-mode" id="np-queue-mode">顺序播放</span>
+          <span class="np-queue-hint" id="np-queue-hint"></span>
+        </div>
+        <div class="np-queue" id="np-queue" role="group" aria-label="播放队列"></div>
+      </aside>
+    </div>
+
+    <div class="np-sheet-layer hidden" id="np-engine-layer">
+      <div class="np-sheet-backdrop" id="np-engine-backdrop" aria-hidden="true"></div>
+      <section class="np-sheet" id="np-engine-sheet" role="dialog" aria-modal="false" aria-labelledby="np-engine-title">
+        <header class="np-sheet-head">
+          <div>
+            <span class="eyebrow">Stream · BTR</span>
+            <h2 id="np-engine-title">传输详情</h2>
+          </div>
+          <button class="np-sheet-close" id="np-engine-close" type="button" title="关闭" aria-label="关闭传输详情">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+          </button>
+        </header>
+
+        <div class="np-engine">
+          <div class="np-engine-hero">
+            <div class="np-engine-speed">
+              <span class="np-engine-label" id="np-speed-label">实时缓冲</span>
+              <div class="np-engine-value">
+                <strong id="np-speed-value">0.0</strong>
+                <span id="np-speed-unit">MB/s</span>
+              </div>
+              <span class="np-engine-mode" id="np-engine-live">BTR · 8 并发</span>
+            </div>
+            <svg class="np-spark" viewBox="0 0 240 64" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="np-spark-stroke" x1="0" y1="0" x2="1" y2="0">
+                  <stop class="np-spark-stop-a" offset="0" />
+                  <stop class="np-spark-stop-b" offset="1" />
+                </linearGradient>
+                <linearGradient id="np-spark-fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop class="np-spark-fill-a" offset="0" />
+                  <stop class="np-spark-fill-b" offset="1" />
+                </linearGradient>
+              </defs>
+              <path id="np-spark-area" fill="url(#np-spark-fill)" d="" />
+              <path id="np-spark-line" fill="none" stroke="url(#np-spark-stroke)" stroke-width="1.6"
+                stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" d="" />
+            </svg>
+          </div>
+
+          <div class="np-meter">
+            <div class="np-meter-head">
+              <span>引擎已下载</span>
+              <b id="np-buf-text">—</b>
+            </div>
+            <div class="np-meter-track"><i id="np-buf-fill"></i></div>
+          </div>
+
+          <div class="np-stat-grid">
+            <div class="np-stat"><span>并发连接</span><b id="np-stat-conc">—</b></div>
+            <div class="np-stat"><span>分块</span><b id="np-stat-chunk">—</b></div>
+            <div class="np-stat"><span>对冲 / 重试</span><b id="np-stat-hedge">—</b></div>
+            <div class="np-stat"><span>累计发送</span><b id="np-stat-served">—</b></div>
+          </div>
+
+          <div class="np-nodes">
+            <div class="np-nodes-head">
+              <span>CDN 节点</span>
+              <span id="np-node-count">—</span>
+            </div>
+            <div class="np-node-list" id="np-node-list"></div>
+          </div>
+
+          <div class="np-engine-note hidden" id="np-engine-note">
+            <span class="np-note-dot" aria-hidden="true"></span>
+            <p id="np-engine-note-text">BTR 已关闭，当前为单连接直通。开启后可多 CDN 并发分段拉流。</p>
+            <button class="np-link" id="np-engine-note-btn" type="button">开启 BTR</button>
+          </div>
+
+          <div class="np-engine-actions">
+            <button class="np-ghost" id="np-engine-settings" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9 18V5l11-2v13" />
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="17" cy="16" r="3" />
+              </svg>
+              调整引擎参数
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="np-toast" id="np-toast" role="status" aria-live="polite"></div>
+  </section>
 
   <div class="settings-modal hidden" id="settings-modal">
     <div class="settings-window" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <aside class="settings-rail">
         <div class="settings-brand">
-          <div class="settings-brand-mark">♪</div>
-          <div>
+          <div class="settings-brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <g fill="currentColor">
+                <ellipse cx="8.4" cy="16.2" rx="3" ry="2.3" transform="rotate(-20 8.4 16.2)" />
+                <ellipse cx="16.4" cy="14.9" rx="3" ry="2.3" transform="rotate(-20 16.4 14.9)" />
+                <rect x="10" y="6.2" width="1.8" height="10.4" rx=".9" />
+                <rect x="18" y="4.9" width="1.8" height="10.4" rx=".9" />
+                <path d="M10 6.2 19.8 4.9v2.6L10 8.8Z" />
+              </g>
+            </svg>
+          </div>
+          <div class="settings-brand-copy">
             <strong>BiliMuse</strong>
             <span>桌面偏好设置</span>
           </div>
         </div>
 
         <nav class="settings-nav" aria-label="设置分类">
+          <button class="settings-nav-item" data-settings-tab="appearance">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="8.6" />
+              <path d="M12 3.4a8.6 8.6 0 0 1 0 17.2Z" fill="currentColor" stroke="none" />
+            </svg>
+            <span>外观</span>
+          </button>
           <button class="settings-nav-item active" data-settings-tab="playback">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M9 18V5l11-2v13" />
@@ -206,13 +593,71 @@
       <section class="settings-content">
         <header class="settings-header">
           <div>
+            <span class="eyebrow">Preferences</span>
             <h2 id="settings-title">播放与音质</h2>
             <p id="settings-subtitle">调整音轨选择与播放器的默认行为</p>
           </div>
-          <button class="settings-close" id="close-settings" aria-label="关闭设置">✕</button>
+          <button class="settings-close" id="close-settings" aria-label="关闭设置">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+          </button>
         </header>
 
         <div class="settings-scroll">
+          <!-- 外观 -->
+          <section class="settings-pane" data-settings-pane="appearance">
+            <div class="settings-group">
+              <div class="settings-group-head">
+                <h3>界面风格</h3>
+                <span>保存在本机</span>
+              </div>
+              <div class="theme-grid">
+                <button class="theme-card" type="button" data-theme-choice="ink" aria-pressed="true">
+                  <span class="theme-preview theme-preview-ink" aria-hidden="true">
+                    <i class="tp-bar"></i><i class="tp-line"></i><i class="tp-line short"></i><i class="tp-dot"></i>
+                  </span>
+                  <span class="theme-card-copy">
+                    <strong>墨 · 黑白</strong>
+                    <small>深色底、纸白字，像黑胶封套的背面</small>
+                  </span>
+                  <span class="theme-check" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 6.5" /></svg>
+                  </span>
+                </button>
+                <button class="theme-card" type="button" data-theme-choice="paper" aria-pressed="false">
+                  <span class="theme-preview theme-preview-paper" aria-hidden="true">
+                    <i class="tp-bar"></i><i class="tp-line"></i><i class="tp-line short"></i><i class="tp-dot"></i>
+                  </span>
+                  <span class="theme-card-copy">
+                    <strong>纸 · 黑白</strong>
+                    <small>米白纸面、墨色字，安静而清晰</small>
+                  </span>
+                  <span class="theme-check" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 6.5" /></svg>
+                  </span>
+                </button>
+                <button class="theme-card" type="button" data-theme-choice="cream" aria-pressed="false">
+                  <span class="theme-preview theme-preview-cream" aria-hidden="true">
+                    <i class="tp-bar"></i><i class="tp-line"></i><i class="tp-line short"></i><i class="tp-dot"></i>
+                  </span>
+                  <span class="theme-card-copy">
+                    <strong>米 · 暖调</strong>
+                    <small>亚麻与咖啡色，适合夜晚的小音量</small>
+                  </span>
+                  <span class="theme-check" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 6.5" /></svg>
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-tip">
+              <span class="settings-tip-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2 5.6 5.6" /><circle cx="12" cy="12" r="4" /></svg>
+              </span>
+              <p>三套主题都保持同样的信息层级；封面是页面里唯一的彩色来源。选择会立刻生效，只保存在本机。</p>
+            </div>
+          </section>
+
           <!-- 播放与音质 -->
           <section class="settings-pane active" data-settings-pane="playback">
             <div class="settings-group">
@@ -264,7 +709,9 @@
             </div>
 
             <div class="settings-tip">
-              <span class="settings-tip-icon">♫</span>
+              <span class="settings-tip-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></svg>
+              </span>
               <p>实际音质取决于 B 站返回的音轨，拿不到无损时无感回退。</p>
             </div>
           </section>
@@ -328,7 +775,9 @@
             </div>
 
             <div class="settings-tip">
-              <span class="settings-tip-icon">⚡</span>
+              <span class="settings-tip-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4.5 13H11l-1 9 8.5-11H12l1-9Z" /></svg>
+              </span>
               <p>8 并发 + 512 KB 适合多数家庭网络；线路不稳可先降到 4。</p>
             </div>
           </section>
@@ -343,11 +792,26 @@
               <div class="settings-card" id="folder-visibility-list">
                 <div class="settings-empty">正在读取收藏夹…</div>
               </div>
-              <button class="ghost folder-show-all hidden" id="show-all-folders">全部显示</button>
+              <div class="folder-bulk-actions">
+                <button
+                  class="ghost"
+                  id="show-all-folders"
+                  title="一键全选：打开所有收藏夹开关"
+                  aria-label="一键全选，显示所有收藏夹"
+                >全选</button>
+                <button
+                  class="ghost"
+                  id="hide-all-folders"
+                  title="一键全不选：关闭所有收藏夹开关"
+                  aria-label="一键全不选，隐藏所有收藏夹"
+                >全不选</button>
+              </div>
             </div>
 
             <div class="settings-tip">
-              <span class="settings-tip-icon">👁</span>
+              <span class="settings-tip-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="3" /></svg>
+              </span>
               <p>只影响本机列表，不会取消 B 站收藏；新收藏夹默认显示。</p>
             </div>
           </section>
@@ -397,7 +861,9 @@
             </div>
 
             <div class="settings-tip">
-              <span class="settings-tip-icon">🔒</span>
+              <span class="settings-tip-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="10" width="15" height="10" rx="2.5" /><path d="M8 10V7.5a4 4 0 0 1 8 0V10" /></svg>
+              </span>
               <p>登录态只存本机配置目录（0600），不上传任何第三方服务器。</p>
             </div>
           </section>
@@ -405,36 +871,22 @@
           <!-- 关于 -->
           <section class="settings-pane" data-settings-pane="about">
             <div class="about-hero">
-              <div class="about-mark">♪</div>
+              <div class="about-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <g fill="currentColor">
+                    <ellipse cx="8.4" cy="16.2" rx="3" ry="2.3" transform="rotate(-20 8.4 16.2)" />
+                    <ellipse cx="16.4" cy="14.9" rx="3" ry="2.3" transform="rotate(-20 16.4 14.9)" />
+                    <rect x="10" y="6.2" width="1.8" height="10.4" rx=".9" />
+                    <rect x="18" y="4.9" width="1.8" height="10.4" rx=".9" />
+                    <path d="M10 6.2 19.8 4.9v2.6L10 8.8Z" />
+                  </g>
+                </svg>
+              </div>
               <div class="about-hero-copy">
                 <h3>BiliMuse</h3>
                 <p>把收藏夹变成歌单 · 本地播放器</p>
               </div>
               <span class="about-version">v<span id="settings-version-inline">0.2.2</span></span>
-            </div>
-
-            <div class="settings-group">
-              <div class="settings-group-head">
-                <h3>运行信息</h3>
-              </div>
-              <div class="settings-card info-card">
-                <div class="info-row">
-                  <span>运行方式</span>
-                  <strong id="settings-runtime-mode-inline">桌面版</strong>
-                </div>
-                <div class="info-row">
-                  <span>播放引擎</span>
-                  <strong id="settings-engine-mode-inline">BTR 多线程</strong>
-                </div>
-                <div class="info-row">
-                  <span>更新方式</span>
-                  <strong>GitHub Releases 自动更新</strong>
-                </div>
-                <div class="info-row">
-                  <span>日志位置</span>
-                  <code>~/.cache/bilimuse/desktop.log</code>
-                </div>
-              </div>
             </div>
 
             <div class="settings-group">
@@ -446,6 +898,8 @@
                 <div class="shortcut-row"><span>上一首 / 下一首</span><span><kbd>P</kbd><kbd>N</kbd></span></div>
                 <div class="shortcut-row"><span>快退 / 快进 5 秒</span><span><kbd>←</kbd><kbd>→</kbd></span></div>
                 <div class="shortcut-row"><span>随机播放</span><kbd>S</kbd></div>
+                <div class="shortcut-row"><span>播放详情 / 返回</span><span><kbd>F</kbd><kbd>Esc</kbd></span></div>
+                <div class="shortcut-row"><span>播放队列</span><kbd>Q</kbd></div>
               </div>
             </div>
 
@@ -460,7 +914,10 @@
 
   <div class="modal hidden" id="login-modal">
     <div class="modal-card">
-      <button class="close" id="close-modal">✕</button>
+      <button class="close" id="close-modal" aria-label="关闭登录">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+      </button>
+      <span class="eyebrow center">Sign in</span>
       <h3 id="login-title">扫码登录</h3>
       <p class="muted" id="login-sub">用 B 站手机客户端扫码，登录态只保存在本机 <code>~/.config/bilimuse/</code></p>
 
@@ -479,7 +936,12 @@
       </div>
 
       <div class="login-window-panel hidden" id="login-window-panel">
-        <div class="login-window-icon">🔐</div>
+        <div class="login-window-icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="8.6" />
+            <path d="M12 3.4a8.6 8.6 0 0 1 0 17.2Z" fill="currentColor" stroke="none" />
+          </svg>
+        </div>
         <p id="login-window-status">正在打开 B 站官方登录窗口…</p>
         <p class="login-window-hint muted small">
           账号密码、验证码与人机验证都在官方页面完成；

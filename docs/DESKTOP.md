@@ -42,7 +42,7 @@ desktop/
     ├── Cargo.toml
     ├── build.rs              # 把 target triple 固化给运行时用
     ├── tauri.conf.json       # 窗口/打包/externalBin/updater 配置
-    ├── capabilities/         # Tauri v2 权限（页面不用 IPC，只留 core:default）
+    ├── capabilities/         # Tauri v2 权限（本地启动页 / 引擎页面的远程来源分开授权）
     ├── icons/                # 从 assets/branding 的 SVG 母版生成
     ├── binaries/             # 边车产物（不入库）
     └── src/
@@ -51,7 +51,8 @@ desktop/
         └── update.rs         # GitHub Release 自动更新（检查/下载/安装/重启）
 .github/workflows/release.yml # 打 tag 后构建各平台安装包并发布 Release
 scripts/
-├── build_sidecar.sh          # PyInstaller 打包边车
+├── build_sidecar.py          # PyInstaller 打包边车（跨平台，tauri dev/build 实际调它）
+├── build_sidecar.sh          # 薄壳：CI 和文档里的 `bash scripts/build_sidecar.sh` 仍可用
 ├── sidecar_entry.py          # 打包入口（保留包内相对导入）
 └── make_icon.py              # 从 SVG 母版生成桌面/网页图标
 ```
@@ -69,21 +70,59 @@ scripts/
 端口用 0 而不是固定 8756：桌面版可能和网页版同时开着，也可能同时开两份，
 固定端口会直接冲突。
 
+## 窗口与标题栏
+
+Windows 上主窗口是 `decorations(false)` 的无边框窗口，系统标题栏由页面顶栏兼任：
+
+- 顶栏整体是拖动区域（`data-tauri-drag-region="deep"`），双击最大化 / 还原；
+  侧栏顶部的品牌区（logo + BiliMuse）同样可以拖动窗口。
+- 顶栏右端三枚按钮调用 Tauri 窗口 API：最小化、最大化/还原、关闭。按钮只吃自己的
+  点击，不影响顶栏其余位置的拖动；最大化图标会跟随 `onResized` 同步，所以拖到屏幕
+  边缘吸附、双击标题栏之后图标也是对的。
+- 启动页带一条同样的迷你标题栏，边车还没起来时也能拖动/关闭窗口；进度光条贴着它的
+  底边跑。
+- 阴影、圆角和描边交给 DWM 收尾：`shadow(true)` 负责无边框窗口的投影与 Win11 圆角，
+  再用 `DwmSetWindowAttribute` 把默认的 1px 白边换成界面里的 `#222834`（Win10 会忽略
+  这两个属性，不影响使用）。
+
+macOS / Linux 保留系统标题栏（traffic light、桌面环境手势都不动），页面按服务端注入的
+`is-windows` 隐藏自绘按钮；顶栏的玻璃工具条与搜索样式仍然保留。
+
+权限上分成两份 capability：本地启动页拿 `core:default` + 四个窗口命令；引擎页面来自
+`http://127.0.0.1:<随机端口>`，只额外拿「拖动 / 最小化 / 最大化 / 关闭 / 读最大化状态 /
+双击最大化 / 监听 resize」这组窗口与事件命令，没有文件、对话框、更新等权限。登录窗口
+依旧不在任何 capability 里。
+
 ## 设置界面
 
-桌面窗口右上角齿轮、左侧栏的「管理」或底部的「设置」都能打开偏好设置。设置窗口按桌面工具习惯
-分成五个分类：
+桌面窗口右上角的齿轮（或左侧栏收藏夹旁的「管理」）能打开偏好设置。设置窗口按桌面工具习惯
+分成六个分类：
 
+- **外观**：墨 / 纸 / 米三套界面风格，卡片式预览，点一下立即生效；
 - **播放与音质**：无损优先、默认音量、当前曲目结束后自动播放下一首；
 - **播放引擎**：BTR 多线程开关、并发连接数和分块大小，修改后立即同步到已解析音轨；
 - **收藏夹**：逐项开关侧栏里要显示的收藏夹；隐藏只影响本机列表，不会取消 B 站收藏；
 - **账号**：查看当前账号 / 演示模式，登录、切换账号或退出登录；
-- **关于**：版本、运行方式、日志位置、键盘快捷键和免责声明。
+- **关于**：版本、键盘快捷键和免责声明。
 
-界面设置（包括收藏夹显示）写入 `~/.config/bilimuse/settings.json`（0600），下次启动继续生效。
-桌面版每次启动使用随机回环端口，`http://127.0.0.1:<port>` 的 localStorage 会随
-端口变化，因此音量与自动播放这类偏好也由 Python 边车持久化，而不是只存在页面里。
+界面设置（包括收藏夹显示与界面主题）写入 `~/.config/bilimuse/settings.json`（0600），
+下次启动继续生效。桌面版每次启动使用随机回环端口，`http://127.0.0.1:<port>` 的
+localStorage 会随端口变化，因此音量、自动播放和主题这类偏好也由 Python 边车持久化；
+localStorage 只作为首帧上色的本地缓存，不是唯一真源。
 登录 cookie 仍单独保存在 `session.json`，两类数据互不混合。
+
+## 播放详情页
+
+点底部播放器左侧的「正在播放」区域、旁边的展开按钮，或按 `F`，会打开播放详情页；
+`Esc` 或左上角返回按钮关闭。左侧是大封面与走带，右侧是播放队列；BTR 实时遥测收进
+底部「传输详情」抽屉，需要时点走带左下角的状态胶囊展开。顶栏同样带
+`data-tauri-drag-region` 和最小化 / 最大化 / 关闭按钮，打开详情页后仍然可以拖动和
+操作窗口；主界面与底部播放器会被设为 `inert`，焦点锁在详情页内。窄窗口会收起队列
+（`Q` 或顶栏按钮展开），高度不足时自动切换为横向布局。
+
+设计规范、状态覆盖、键盘操作和数据来源见 [PLAYBACK.md](PLAYBACK.md)。
+
+![播放详情页](../assets/playback-queue.png)
 
 ## 随机播放整个收藏夹
 
@@ -92,9 +131,10 @@ scripts/
 1. 前端请求 `/api/folder/<id>/all`（夹内搜索时带上 `keyword`）；
 2. 边车把该收藏夹的分页从第 1 页翻到最后，按 bvid 去重、过滤失效稿件，一次返回完整列表
    （`bilimuse/server.py` 的 `load_all_folder_items`）；
-3. 前端把完整列表洗牌后作为播放队列，当前曲目放队首；页面列表本身仍然只渲染前 40 条；
+3. 前端把完整列表洗牌后作为播放队列，当前曲目放队首；页面列表按 40 条一页滚动加载，
+   滚到底会自动补下一页，也可以点底部的「加载更多」；
 4. 「下一首」/ 自动切歌从整个收藏夹里随机取，播到队尾会重新洗牌继续；
-5. 即使列表只加载了前 40 条，随机范围仍是整个收藏夹；开启随机后播放器会显示
+5. 即使列表还没滚动到底，随机范围仍是整个收藏夹；开启随机后播放器会显示
    「正在加载整个收藏夹…」和最终的「随机范围：整个收藏夹 · N 首」。
 
 随机开关只保存在当前页面，不写配置；切换账号会清空整夹缓存。
@@ -132,7 +172,8 @@ B 站的这两种登录都必须先过极验人机验证，自己实现验证码
 - cookie 通过 Tauri 的 `Webview::cookies()` 读取（**能读到 HttpOnly 的 SESSDATA**，
   不依赖页面的 `document.cookie`），再按 `.bilibili.com` 域名筛选。没有用
   `cookies_for_url()`：macOS 上它只保留 domain 完全相等的 cookie，会漏掉父域 cookie。
-- 登录 webview 不在 capability 列表里，没有任何 Tauri IPC 权限；主窗口也不开远程 IPC。
+- 登录 webview 不在 capability 列表里，没有任何 Tauri IPC 权限；主窗口的引擎页面只
+  拿到无边框标题栏需要的窗口/事件命令（见「窗口与标题栏」）。
   桌面壳用最小的回环 HTTP 客户端（`std::net::TcpStream`，无额外依赖）和边车通信。
 - Python 侧先临时替换 cookie 调 `nav` 校验，失败会恢复原登录态；成功才 `auth.save()`
   写 `~/.config/bilimuse/session.json`（0600）。密码从不进入这两个进程。
@@ -155,8 +196,12 @@ sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
 ```
 
 另外需要 Rust（1.77+）、Node.js 18+ 和 Python 3.10+（打包边车用；
-没有 `.venv` 时 `build_sidecar.sh` 会自动建一个并装依赖）。
+没有 `.venv` 时 `build_sidecar.py` 会自动建一个并装依赖）。
 macOS 需要 Xcode Command Line Tools，Windows 需要 WebView2（Win10/11 自带）和 MSVC 工具链。
+
+> Windows 不需要 Git Bash：`tauri.windows.conf.json` 的 `beforeDevCommand` 直接调用
+> `python scripts/build_sidecar.py`。PATH 里的 `bash` 往往是 `C:\Windows\System32\bash.exe`
+> （WSL 启动器），它看不到 Windows 的 rustc，也打不出 `.exe`，别用它打包边车。
 
 ## 开发
 
@@ -218,9 +263,9 @@ Windows 是 `%LOCALAPPDATA%\bilimuse\desktop.log`。超过 2 MB 会在下次启�
 
 | 平台 | 说明 |
 | --- | --- |
-| Linux | 已验证 `.deb` 构建与实跑（Ubuntu 24.04）；需要 webkit2gtk-4.1 |
-| Windows | 用 `npx tauri build --bundles nsis`；边车产物带 `.exe` 后缀（脚本已处理），子进程用 `CREATE_NO_WINDOW` 防止弹黑框，退出时用 `taskkill /T` |
-| macOS | 用 `npx tauri build --bundles app,dmg`；需要 `icon.icns`（`npx tauri icon icons/icon.png` 生成），边车要在 macOS 上重新打包 |
+| Linux | 已验证 `.deb` 构建与实跑（Ubuntu 24.04）；需要 webkit2gtk-4.1；保留系统标题栏 |
+| Windows | 无边框窗口 + 页面自绘标题栏；用 `npx tauri build --bundles nsis`；边车产物带 `.exe` 后缀（脚本已处理），子进程用 `CREATE_NO_WINDOW` 防止弹黑框，退出时用 `taskkill /T` |
+| macOS | 保留系统标题栏与 traffic light；用 `npx tauri build --bundles app,dmg`；需要 `icon.icns`（`npx tauri icon icons/icon.png` 生成），边车要在 macOS 上重新打包 |
 
 `tauri.conf.json` 里的 `bundle.targets` 是 `["deb", "appimage"]`（Linux 默认）。
 在其他平台构建时用 `--bundles` 覆盖即可，不用改配置。
@@ -302,6 +347,8 @@ Linux 自动更新只保证 AppImage 安装方式可用；通过 `.deb` 安装�
 在本仓库的开发机上实际跑通过：
 
 - `cargo build` / `cargo fmt --check` 通过
+- Windows 无边框窗口实测：顶栏拖动/双击最大化、右上角最小化/最大化/还原/关闭均走
+  Tauri IPC 成功，最大化图标随窗口状态同步；启动页标题栏按钮同样可用
 - `npm run build`（`tauri build --bundles deb`）产出 17.9 MiB 安装包
 - 启动后窗口加载真实界面，边车随机端口可用（`/api/health` 返回 0.1.0）
 - 演示模式可解析音轨并返回 `206 Partial Content`（BTR 链路可用）
@@ -319,6 +366,8 @@ Linux 自动更新只保证 AppImage 安装方式可用；通过 `.deb` 安装�
 ## 已知限制
 
 - 还没做单实例：重复启动会开两个窗口、两个边车（端口不同，不冲突）
+- Windows 自绘标题栏暂不支持 Win11 的 Snap Layouts 悬停菜单（最大化按钮右键/悬停），
+  拖到屏幕边缘吸附、Win+方向键仍然可用
 - 还没做托盘/关闭到后台：关窗即退出，音乐随之停止
 - 还没做系统媒体键：网页版已经接了 Media Session，桌面壳后续可以补一层原生快捷键
 - 安装包比网页版大 ~20 MB，首次启动边车需要解包，约 0.5–1.5 秒
@@ -330,7 +379,9 @@ Linux 自动更新只保证 AppImage 安装方式可用；通过 `.deb` 安装�
 
 | 现象 | 原因 / 处理 |
 | --- | --- |
-| 启动页报"找不到 Python 引擎" | 没打包边车：`bash scripts/build_sidecar.sh` |
+| 启动页报"找不到 Python 引擎" | 没打包边车：`python scripts/build_sidecar.py` |
+| `beforeDevCommand` 报 `set: pipefail: invalid option name` | 脚本被检出成了 CRLF（Windows 的 `core.autocrlf=true`）：`git add --renormalize .` 后重新检出；仓库 `.gitattributes` 已把 `*.sh` 固定为 LF |
+| Windows 上边车脚本报 `rustc: command not found` / `无法确定 target triple` | `bash` 是 WSL 的启动器，看不到 Windows 工具链：改用 `python scripts/build_sidecar.py`（`tauri dev` 已自动这么做） |
 | 启动页报"本地引擎启动超时" | 看 `~/.cache/bilimuse/desktop.log`；常见是缺 OpenSSL 或杀毒软件拦截 |
 | `cargo build` 报 `webkit2gtk-4.1` not found | 装 `libwebkit2gtk-4.1-dev` |
 | 窗口全黑 | 边车起来了但前端没加载：确认 `bilimuse/web/` 被打进边车（`--add-data`） |

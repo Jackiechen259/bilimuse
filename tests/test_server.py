@@ -131,6 +131,7 @@ def test_settings_roundtrip(api):
             "volume": 0.55,
             "autoplay_next": False,
             "hidden_folders": [7, 3, 7],
+            "theme": "cream",
         },
     )
     data = resp.json()
@@ -138,8 +139,12 @@ def test_settings_roundtrip(api):
     assert data["volume"] == 0.55
     assert data["autoplay_next"] is False
     assert data["hidden_folders"] == [3, 7]
+    assert data["theme"] == "cream"
     # /api/state 也给前端带同一份显示设置
     assert api.get("/api/state").json()["settings"]["hidden_folders"] == [3, 7]
+    assert api.get("/api/state").json()["settings"]["theme"] == "cream"
+    # 未知主题不会写进配置
+    assert api.post("/api/settings", json={"theme": "neon"}).status_code == 422
     resp = api.post("/api/settings", json={"concurrency": 999, "volume": 2})
     data = resp.json()
     assert data["concurrency"] <= 64
@@ -151,6 +156,7 @@ def test_settings_roundtrip(api):
             "volume": 0.9,
             "autoplay_next": True,
             "hidden_folders": [],
+            "theme": "ink",
         },
     )
 
@@ -275,6 +281,35 @@ async def test_folder_items_caps_ps_at_bilibili_limit():
     assert FAV_MAX_PAGE_SIZE == 40
     assert server.FULL_PAGE_SIZE <= FAV_MAX_PAGE_SIZE
     assert seen["ps"] == str(FAV_MAX_PAGE_SIZE)
+
+
+def test_index_injects_saved_theme(api):
+    """桌面版端口随机，主题必须首帧由服务端注入，页面脚本不能把它覆盖掉。"""
+    assert api.post("/api/settings", json={"theme": "cream"}).status_code == 200
+    html = api.get("/").text
+    assert 'data-theme="cream"' in html
+    assert "preset === 'ink'" in html
+    api.post("/api/settings", json={"theme": "ink"})
+
+
+def test_settings_theme_persist(tmp_path, monkeypatch):
+    """界面主题也要跨进程保留：桌面端每次启动端口不同，不能只靠 localStorage。"""
+    from bilimuse import config as config_module
+
+    monkeypatch.setattr(config_module, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_module, "SETTINGS_FILE", tmp_path / "settings.json")
+
+    settings = config_module.Settings()
+    settings.theme = "cream"
+    assert settings.save() is True
+
+    restored = config_module.Settings()
+    restored.load()
+    assert restored.theme == "cream"
+
+    restored.theme = "neon"
+    restored.clamp()
+    assert restored.theme is None
 
 
 def test_settings_hidden_folders_persist(tmp_path, monkeypatch):

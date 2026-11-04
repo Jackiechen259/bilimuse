@@ -16,7 +16,7 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from . import auth, demo
 from .api import BiliClient, BiliError, FAV_MAX_PAGE_SIZE, NotLoggedIn, pick_audio
 from .btr import BTRStream, SimpleStream, StreamError, build_stream
-from .config import CACHE_DIR, REFERER, UA, VERSION, WEB_DIR, settings
+from .config import CACHE_DIR, REFERER, THEMES, UA, VERSION, WEB_DIR, settings
 
 MEDIA_HEADERS = {
     "User-Agent": UA,
@@ -530,8 +530,12 @@ async def api_folder(
         data = await bili.folder_items(fid, pn, ps, keyword)
     except (BiliError, httpx.HTTPError) as exc:
         raise _http_error(exc)
-    folders = {f["id"]: f["title"] for f in (await bili.folders())}
-    data["title"] = folders.get(fid, "收藏夹")
+    # 标题只在第一页取一次；翻页时不必再拉整个收藏夹列表
+    if pn == 1:
+        folders = {f["id"]: f["title"] for f in (await bili.folders())}
+        data["title"] = folders.get(fid, "收藏夹")
+    else:
+        data["title"] = ""
     # 过滤掉"已失效"的稿件
     data["items"] = [i for i in data["items"] if i["bvid"] and not (i["attr"] & 9)]
     return data
@@ -708,6 +712,7 @@ class SettingsPatch(BaseModel):
     volume: float | None = None
     autoplay_next: bool | None = None
     hidden_folders: list[int] | None = None
+    theme: Literal["ink", "paper", "cream"] | None = None
 
 
 @app.get("/api/settings")
@@ -731,6 +736,8 @@ async def api_set_settings(patch: SettingsPatch) -> dict[str, Any]:
         settings.autoplay_next = patch.autoplay_next
     if patch.hidden_folders is not None:
         settings.hidden_folders = patch.hidden_folders
+    if patch.theme is not None:
+        settings.theme = patch.theme
     settings.clamp()
     settings.save()
     # 已解析的音轨也立刻套用新并发
@@ -785,10 +792,20 @@ async def demo_audio(name: str, request: Request):
 @app.get("/", response_class=HTMLResponse)
 async def index() -> HTMLResponse:
     html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    attrs: list[str] = []
     if state.desktop_shell:
         # 桌面壳在首帧就带上 is-desktop：否则顶栏会先按网页版排版，
         # 等 /api/state 返回后再跳成桌面样式，启动瞬间能看到一次闪动。
-        html = html.replace('<html lang="zh-CN">', '<html lang="zh-CN" class="is-desktop">', 1)
+        # 只有 Windows 壳是无边框窗口（顶栏右端自带窗口按钮），macOS/Linux
+        # 保留系统标题栏，因此再补一个 is-windows 让样式按平台分流。
+        classes = "is-desktop is-windows" if sys.platform == "win32" else "is-desktop"
+        attrs.append(f'class="{classes}"')
+    if settings.theme in THEMES:
+        # 桌面版端口随机，localStorage 保不住主题；由服务端在首帧注入，
+        # 避免每次启动先闪一下墨色再切到纸 / 米。
+        attrs.append(f'data-theme="{settings.theme}"')
+    if attrs:
+        html = html.replace('<html lang="zh-CN"', f'<html lang="zh-CN" {" ".join(attrs)}', 1)
     return HTMLResponse(html)
 
 
