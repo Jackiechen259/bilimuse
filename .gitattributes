@@ -1,0 +1,10 @@
+# 换行符策略：仓库里的 shell 脚本一律 LF。
+#
+# Windows 上 core.autocrlf=true（不少人的默认配置）会把检出内容转成 CRLF，
+# 于是脚本第 9 行的 `set -euo pipefail` 变成 `set -o pipefail\r`，
+# bash 报 “set: pipefail: invalid option name”，`tauri dev` 的
+# beforeDevCommand 还没开始干活就以 exit 2 失败（Python 边车也就不可能被打包出来）。
+# 显式声明 eol=lf 后，无论本机 autocrlf 怎么设，检出都保持 LF。
+*.sh    text eol=lf
+*.bash  text eol=lf
+gradlew text eol=lf
