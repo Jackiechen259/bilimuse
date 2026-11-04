@@ -936,6 +936,8 @@ html.is-windows .window-controls {
 .buttons button svg { width: 18px; height: 18px; }
 .buttons button:hover { color: var(--text); background: var(--hover); }
 .buttons button.active { color: var(--accent); background: var(--accent-soft); }
+.buttons button:disabled { opacity: 0.35; cursor: default; }
+.buttons button:disabled:hover { color: var(--muted); background: transparent; }
 .buttons .play {
   width: 42px;
   height: 42px;
@@ -1861,7 +1863,6 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
 }
 .np-tool svg { width: 15px; height: 15px; }
 .np-tool:hover { color: var(--text); background: var(--hover); }
-.np-queue-toggle[aria-expanded="true"] { color: var(--text); background: var(--surface); }
 html.is-windows .np-header { padding-right: 6px; }
 
 /* ============================================================ 播放详情 · 主区 */
@@ -2255,7 +2256,8 @@ html.is-windows .np-header { padding-right: 6px; }
 .np-ctrl svg { width: 18px; height: 18px; stroke-width: 1.5; }
 .np-ctrl-step svg { width: 20px; height: 20px; fill: currentColor; stroke: none; }
 .np-ctrl:hover { color: var(--text); background: var(--hover); }
-.np-ctrl.active { color: var(--accent); background: var(--accent-soft); }
+.np-ctrl.active,
+.np-ctrl[aria-expanded="true"] { color: var(--accent); background: var(--accent-soft); }
 .np-play {
   width: 58px;
   height: 58px;

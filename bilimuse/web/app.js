@@ -1466,6 +1466,8 @@ function npSyncEntry() {
   $('now').classList.toggle('is-live', hasTrack && npPlaying());
   const expand = $('open-now-playing');
   if (expand) expand.disabled = !hasTrack;
+  const queue = $('queue-btn');
+  if (queue) queue.disabled = !hasTrack;
 }
 
 function npRenderQueue() {
@@ -1772,10 +1774,10 @@ function npQueueIsOverlay() {
 
 function npSetQueue(open, { focus = false } = {}) {
   $('now-playing').classList.toggle('np-queue-open', Boolean(open));
-  const toggle = $('np-queue-toggle');
-  if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+  const toggles = document.querySelectorAll('[data-queue-toggle]');
+  toggles.forEach((btn) => btn.setAttribute('aria-expanded', String(Boolean(open))));
   if (!open) {
-    if (focus && toggle) toggle.focus({ preventScroll: true });
+    if (focus && toggles.length) toggles[0].focus({ preventScroll: true });
     return;
   }
   npRenderQueue();
@@ -2672,6 +2674,11 @@ $('open-now-playing').addEventListener('click', (evt) => {
   evt.stopPropagation();
   openNowPlaying();
 });
+// 底部播放条右侧的队列键：打开详情页，并直接把播放队列展开
+$('queue-btn').addEventListener('click', () => {
+  openNowPlaying();
+  if (npOpen()) npSetQueue(true);
+});
 $('np-close').addEventListener('click', closeNowPlaying);
 $('np-play').addEventListener('click', togglePlay);
 $('np-art').addEventListener('click', togglePlay);
@@ -2699,7 +2706,7 @@ $('np-engine-note-btn').addEventListener('click', async () => {
 $('np-volume').addEventListener('input', (evt) => {
   setPreference({ volume: Number(evt.target.value) });
 });
-$('np-queue-toggle').addEventListener('click', () => {
+$('np-queue-btn').addEventListener('click', () => {
   const open = !$('now-playing').classList.contains('np-queue-open');
   npSetQueue(open, { focus: open && npQueueIsOverlay() });
 });
