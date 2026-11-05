@@ -116,7 +116,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:assembleRelease
 
 # 本地模拟 CI 的发布版本号（自动更新比较的就是 versionName）
-./gradlew :app:assembleRelease -PbilimuseVersionName=0.2.2 -PbilimuseVersionCode=202
+./gradlew :app:assembleRelease -PbilimuseVersionName=0.2.3 -PbilimuseVersionCode=203
 ```
 
 第一次构建会下载 Compose、Media3、OkHttp、Coil、ZXing 等依赖，约 1–3 分钟。
@@ -273,15 +273,15 @@ base64 -w0 bilimuse-release.jks   # macOS 用：base64 -i bilimuse-release.jks
 2. 打 tag 并推送：
 
    ```bash
-   git tag v0.2.2
-   git push origin v0.2.2
+   git tag v0.2.3
+   git push origin v0.2.3
    ```
 
 3. `.github/workflows/release.yml` 的 `android` job 会：
-   - 从 tag 解析 `versionName=0.2.2`、`versionCode=202`
+   - 从 tag 解析 `versionName=0.2.3`、`versionCode=203`
      （`major * 10000 + minor * 100 + patch`）；
    - 用 JDK 17 构建 `:app:assembleRelease`（有 Secrets 就用正式签名）；
-   - 把 APK 命名为 `BiliMuse-android-0.2.2.apk`，上传到同一个**草稿** Release。
+   - 把 APK 命名为 `BiliMuse-android-0.2.3.apk`，上传到同一个**草稿** Release。
 4. 打开 GitHub 的草稿 Release，确认 APK 已上传，再点 **Publish release**。只有发布后，
    应用内检查才能看到它。
 5. 已安装旧版本的设备在下次冷启动（或手动检查）时会看到更新。
