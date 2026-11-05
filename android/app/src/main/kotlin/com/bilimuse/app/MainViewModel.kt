@@ -22,6 +22,7 @@ import com.bilimuse.app.data.loadAllFolderTracks
 import com.bilimuse.app.data.update.UpdateCheckResult
 import com.bilimuse.app.data.update.UpdateStatus
 import com.bilimuse.app.data.update.UpdateUiState
+import com.bilimuse.app.player.PlayQueueUiState
 import com.bilimuse.app.player.PlayerController
 import com.bilimuse.app.player.PlayerUiState
 import kotlinx.coroutines.CancellationException
@@ -31,11 +32,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -86,6 +90,19 @@ private data class QueueSource(
     val scope: String = if (keyword.isEmpty()) "整个收藏夹" else "全部搜索结果"
 }
 
+/**
+ * 队列面板需要的来源快照。
+ * 用户切到别的收藏夹后，列表状态已经不再描述正在播放的队列，所以总数、分页
+ * 和「是否已补全整个收藏夹」要在开始播放时记下来。
+ */
+private data class QueueMeta(
+    val key: String = "",
+    val scope: String = "整个收藏夹",
+    val totalHint: Int = 0,
+    /** 随机播放已经把这个来源的全部曲目补进队列，顺序播放也不再需要「加载下一页」。 */
+    val full: Boolean = false,
+)
+
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val container = (app as BiliMuseApp).container
     private val bili: BiliClient = container.bili
@@ -103,6 +120,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _shufflePool = MutableStateFlow(ShufflePoolState())
     val shufflePool: StateFlow<ShufflePoolState> = _shufflePool.asStateFlow()
+
+    private val _queueMeta = MutableStateFlow(QueueMeta())
+
+    /**
+     * 播放队列面板状态：实际队列来自 MediaController，来源 / 分页信息来自本机快照。
+     * 只有仍停留在同一个收藏夹视图时才允许「加载下一页」，避免把另一个收藏夹
+     * 的内容补进正在播放的队列。
+     */
+    val queue: StateFlow<PlayQueueUiState> = combine(
+        player.queue,
+        _library,
+        _shufflePool,
+        _queueMeta,
+    ) { queueState, libraryState, poolState, meta ->
+        val viewKey = if (libraryState.demo) {
+            "demo:${libraryState.search.trim().lowercase()}"
+        } else {
+            "${libraryState.selectedFolderId}:${libraryState.search.trim().lowercase()}"
+        }
+        val sameView = meta.key.isNotEmpty() && meta.key == viewKey
+        PlayQueueUiState(
+            items = queueState.items,
+            currentIndex = queueState.currentIndex,
+            shuffle = queueState.shuffle,
+            scope = meta.scope,
+            total = if (queueState.shuffle) {
+                queueState.items.size
+            } else {
+                maxOf(meta.totalHint, queueState.items.size)
+            },
+            hasMore = !queueState.shuffle && sameView && !meta.full && libraryState.hasMore,
+            loadingMore = sameView && libraryState.loadingMore,
+            preparing = queueState.shuffle && poolState.preparing,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = PlayQueueUiState(),
+    )
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
@@ -490,6 +546,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 error = null,
             )
         }
+        // 列表往下翻页时，正在播放的同一收藏夹队列也跟着变长；桌面版队列也是
+        // 直接读取列表，所以这里保持三端一致。已存在的 bvid 会被自动跳过。
+        if (append) {
+            val key = if (registry.demoMode) {
+                "demo:${keyword.lowercase()}"
+            } else {
+                "$folderId:${keyword.lowercase()}"
+            }
+            if (queueSource?.key == key && player.queueSize() > 0) {
+                player.appendToQueue(result.items)
+            }
+        }
     }
 
     private suspend fun fetchTracks(
@@ -662,6 +730,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             loaded = tracks.size,
             scope = source.scope,
         )
+        _queueMeta.update {
+            it.copy(totalHint = maxOf(it.totalHint, tracks.size), full = true)
+        }
         val added = player.appendToQueue(tracks)
         if (announce || added > 0) {
             _messages.tryEmit(
@@ -691,6 +762,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         fullTracksCache.clear()
         queueSource = null
         _shufflePool.value = ShufflePoolState()
+        _queueMeta.value = QueueMeta()
     }
 
     // ------------------------------------------------------------------ 播放
@@ -707,6 +779,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 registry.resolve(track.bvid, track.title)
                 _library.update { it.copy(resolvingBvid = null) }
                 queueSource = source
+                _queueMeta.value = QueueMeta(
+                    key = source.key,
+                    scope = source.scope,
+                    totalHint = if (source.keyword.isEmpty()) {
+                        maxOf(tracks.size, _library.value.total)
+                    } else {
+                        tracks.size
+                    },
+                )
                 player.playQueue(tracks, index)
                 if (player.isShuffleEnabled()) prepareFullQueue(source)
             } catch (e: CancellationException) {
@@ -736,6 +817,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun next() = player.next()
 
     fun previous() = player.previous()
+
+    /** 播放队列面板里点某一首；点当前曲目只在暂停时恢复播放，不从头重来。 */
+    fun playQueueItem(index: Int) {
+        val queueState = queue.value
+        if (index !in queueState.items.indices) return
+        if (index == queueState.currentIndex) {
+            if (!playerState.value.isPlaying) player.togglePlay()
+            return
+        }
+        player.playQueueItem(index)
+    }
+
+    /**
+     * 队列面板的「加载下一页」：只在列表仍停在同一个收藏夹视图时可用。
+     * 新页会同时追加到列表和正在播放的队列（见 loadPage）。
+     */
+    fun loadMoreQueue() {
+        val queueState = queue.value
+        if (!queueState.canLoadMore || queueState.loadingMore) return
+        loadMore()
+    }
 
     fun seekTo(ms: Long) = player.seekTo(ms)
 

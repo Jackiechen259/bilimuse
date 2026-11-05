@@ -76,9 +76,10 @@ android/
 │   ├── player/
 │   │   ├── PlaybackService.kt # MediaLibraryService + ExoPlayer
 │   │   ├── AutoLibrary.kt     # Android Auto 收藏夹媒体库树 + 分页
-│   │   ├── PlayerController.kt# UI ↔ MediaController 桥
+│   │   ├── PlayerController.kt# UI ↔ MediaController 桥（含实际播放队列）
+│   │   ├── PlayQueueUiState.kt# 队列面板的纯展示状态与文案
 │   │   └── BtrDataSource.kt   # Media3 DataSource
-│   ├── ui/                    # Compose 界面、主题、登录/收藏夹/设置/更新弹层
+│   ├── ui/                    # Compose 界面、主题、登录/收藏夹/设置/更新/播放队列
 │   ├── MainViewModel.kt
 │   └── MainActivity.kt
 └── app/src/test/kotlin/...    # JVM 测试（不需要模拟器）
@@ -311,6 +312,8 @@ APK 资产的选择规则：优先名字带 `universal` 的；其次没有 ABI �
 - 收藏夹显示管理：从书库的「管理收藏夹」进入独立页面逐项开关，隐藏项不会出现在手机列表和 Android Auto 中；
   只影响本机显示，不会取消 B 站收藏，新收藏夹默认显示
 - 点击播放、队列、上一首/下一首、拖动进度、随机、单曲循环/列表循环
+- 播放队列：正在播放页右上角的队列键打开底部面板，查看当前队列、顺序/随机范围与进度，
+  点任意行直接切歌；长队列懒加载，顺序播放时可在队尾加载下一页
 - 随机播放覆盖**整个收藏夹**：开启随机后会在后台把剩余分页全部拉下来，再补进播放队列，
   不再局限于列表已经加载过的内容；夹内搜索时同样覆盖全部搜索结果。播放页会显示
   「正在加载整个收藏夹 x/y」以及最终的随机范围
@@ -321,6 +324,32 @@ APK 资产的选择规则：优先名字带 `universal` 的；其次没有 ABI �
 - 后台播放：锁屏、通知栏、耳机线控/蓝牙按键（MediaSession）
 - 演示模式：不登录也能跑通整条播放链路，每条连接限速 320 KB/s，可直观看到 BTR 与单连接的差别
 - GitHub Releases 自动更新：启动静默检查（可关）、设置页手动检查、下载进度、APK 完整性与签名校验后交给系统安装器
+
+## 播放队列
+
+正在播放页右上角的队列键打开底部面板，和网页 / 桌面版播放详情页右侧的播放队列对应：
+
+- 标题旁显示曲目总数，第二行是「顺序播放」或「随机播放 · 整个收藏夹 / 全部搜索结果」，
+  右侧是当前 `03 / 128`；顺序播放还有未加载的页时提示「还有更多未加载」。
+- 当前曲目有粉色指示条、高亮底色和跳动的均衡器；点任意行直接切歌，点当前行只在暂停时恢复播放，
+  不会从头重播。
+- 顺序播放时，队尾的「加载下一页」会同时把新一页追加到列表和正在播放的队列；只有列表仍停在
+  同一个收藏夹 / 搜索视图时才提供，避免把另一个收藏夹的内容混进当前队列。
+- 队列直接来自 MediaController 的实际时间线：通知栏、耳机线控和 Android Auto 切换曲目或改动队列，
+  面板也会同步。队列可能上千首，面板用 `LazyColumn` 懒加载，打开时自动把当前曲目滚进视野。
+- 随机播放的推进顺序由 ExoPlayer 内部维护，面板按入队顺序展示媒体项并高亮当前曲目；
+  顺序播放时展示顺序与实际播放顺序一致。
+
+数据流：
+
+```
+MediaController ──(timeline / shuffle 变化)──> PlayerController.queue
+                                                 │
+列表分页 / 收藏夹快照 ──> MainViewModel.queueMeta ─┴──> PlayQueueUiState ──> PlayQueueSheet
+```
+
+`PlayerController` 只在时间线或随机模式变化时重建队列，进度 tick 不复制列表；
+`PlayQueueUiState` 的文案与分页判断是纯数据逻辑，由 `PlayQueueUiStateTest` 覆盖。
 
 ## 登录方式
 
@@ -367,7 +396,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 
 ## 测试
 
-`./gradlew :app:testDebugUnitTest` 共 41 个 JVM 测试：
+`./gradlew :app:testDebugUnitTest` 共 47 个 JVM 测试：
 
 - **WbiTest**：mixin key、`w_rid`、中文/空格/特殊字符编码与 Python 实现一致
 - **BtrEngineTest**：
@@ -381,6 +410,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 - **FolderPagerTest**：整夹翻页（逐页请求、bvid 去重、空页/重复页/页数上限停止、进度回调）
   与随机队列去重
 - **AutoLibraryTest**：Android Auto 收藏夹 mediaId 的生成/解析，以及根节点等非收藏夹 ID 的拒绝
+- **PlayQueueUiStateTest**：顺序 / 随机队列的总数、进度文案、未加载提示、加载更多与空队列状态
 - **UpdateModelsTest**：版本号解析/排序、预发布版优先级、通用/ABI APK 选择、Release → AppUpdate、草稿/预发布过滤
 - **GitHubReleaseApiTest**：MockWebServer 模拟 404、正常 Release、403 限流、坏 JSON，并检查请求路径与 `Accept` 头
 
@@ -389,7 +419,9 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 ## 已验证
 
 - `:app:assembleDebug` 成功，产物 `app-debug.apk` 约 14 MB
-- 41 个 JVM 测试全部通过
+- 47 个 JVM 测试全部通过
+- Pixel 8 API 36 模拟器（软件渲染）上用演示模式验证：播放 → 打开正在播放 → 打开队列面板 →
+  点选切歌 → 随机模式标签 → 返回关闭面板
 - JVM 基准（1 MB 文件、每条连接 400 KB/s）：单连接 ~2.6 s，BTR 645 ms，**约 4.1x**
 - 真实 B 站二维码接口冒烟通过：生成 `account.bilibili.com` 扫码 URL，轮询返回 `pending`
 - Compose 界面在 Robolectric 中以 411×891 dp 真实渲染通过，截图见 `assets/android*.png`
@@ -401,7 +433,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 
 ## 已知限制
 
-- 开发机没有可用的 KVM，**尚未在真机/模拟器上做完整的扫码 → 播放回归**；目前已验证编译、41 个 JVM 测试、真实二维码接口和 Robolectric 界面渲染。第一次装到手机上建议先用「演示模式」确认播放链路
+- 开发机没有可用的 KVM，**尚未在真机/模拟器上做完整的扫码 → 播放回归**；目前已验证编译、47 个 JVM 测试、真实二维码接口和 Robolectric 界面渲染。第一次装到手机上建议先用「演示模式」确认播放链路
 - 自动更新需要 Release 已发布且包含 APK 资产；草稿 / Pre-release 不会被应用看到
 - Android 要求用户在系统安装器里确认，无法像桌面版那样静默安装；下载过程也不驻留后台服务
 - 自动更新的系统安装器、未知来源授权流程尚未在真机上回归（开发机没有可用 KVM）

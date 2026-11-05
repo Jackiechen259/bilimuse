@@ -48,6 +48,16 @@ data class PlayerUiState(
 )
 
 /**
+ * MediaController 里的实际播放队列。
+ * 只在时间线或随机模式变化时重建，避免每 500ms 的进度 tick 复制上千首的数据。
+ */
+data class PlayerQueueState(
+    val items: List<TrackItem> = emptyList(),
+    val currentIndex: Int = -1,
+    val shuffle: Boolean = false,
+)
+
+/**
  * UI 与 PlaybackService 的桥：持有一个 MediaController，把播放器状态
  * 和 BTR 引擎指标汇成 StateFlow 给 Compose。
  */
@@ -76,11 +86,24 @@ class PlayerController(
     private val _state = MutableStateFlow(PlayerUiState())
     val state: StateFlow<PlayerUiState> = _state.asStateFlow()
 
+    private val _queue = MutableStateFlow(PlayerQueueState())
+    val queue: StateFlow<PlayerQueueState> = _queue.asStateFlow()
+
+    /** 时间线 / 随机模式变了才需要重新遍历 MediaItem；切歌只更新下标。 */
+    private var queueDirty = true
+
     private val _errors = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val errors: SharedFlow<String> = _errors.asSharedFlow()
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
+            if (events.containsAny(
+                    Player.EVENT_TIMELINE_CHANGED,
+                    Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED,
+                )
+            ) {
+                queueDirty = true
+            }
             sync()
         }
 
@@ -164,6 +187,37 @@ class PlayerController(
                 engine = engine,
             )
         }
+        syncQueue(c)
+    }
+
+    /**
+     * 把 MediaController 的当前时间线映射成 UI 可用的队列。
+     *
+     * MediaItem 的 metadata 由 [AutoLibrary.trackItem] 从 TrackItem 写入，标题 / UP 主 /
+     * 封面 / 时长都够播放队列面板使用；intro 等列表字段不进队列，避免撑大 Binder 事务。
+     */
+    private fun syncQueue(c: MediaController) {
+        val count = c.mediaItemCount
+        val index = c.currentMediaItemIndex
+        val shuffle = c.shuffleModeEnabled
+        val current = _queue.value
+
+        if (queueDirty || count != current.items.size || shuffle != current.shuffle) {
+            queueDirty = false
+            val items = ArrayList<TrackItem>(count)
+            for (position in 0 until count) {
+                items += c.getMediaItemAt(position).toTrackItem()
+            }
+            _queue.value = PlayerQueueState(
+                items = items,
+                currentIndex = index,
+                shuffle = shuffle,
+            )
+            return
+        }
+        if (index != current.currentIndex) {
+            _queue.value = current.copy(currentIndex = index)
+        }
     }
 
     private suspend fun awaitController(): MediaController? {
@@ -185,6 +239,26 @@ class PlayerController(
         c.setMediaItems(mediaItems, index, 0L)
         c.prepare()
         c.play()
+        // 先给 UI 一份完整的队列，不用等时间线事件再通过 Binder 逐条读回来。
+        _queue.value = PlayerQueueState(
+            items = items,
+            currentIndex = index,
+            shuffle = c.shuffleModeEnabled,
+        )
+        queueDirty = false
+    }
+
+    /** 在播放队列面板里直接点某一首：跳到它的时间线位置并开始播放。 */
+    fun playQueueItem(index: Int) {
+        val c = controller ?: return
+        if (index !in 0 until c.mediaItemCount) return
+        if (c.playbackState == Player.STATE_IDLE) c.prepare()
+        if (index == c.currentMediaItemIndex) {
+            c.play()
+        } else {
+            c.seekToDefaultPosition(index)
+            c.play()
+        }
     }
 
     /**
@@ -251,6 +325,8 @@ class PlayerController(
             it.clearMediaItems()
         }
         queueIds.clear()
+        _queue.value = PlayerQueueState()
+        queueDirty = true
     }
 
     fun seekTo(positionMs: Long) {
@@ -274,6 +350,8 @@ class PlayerController(
         ticker?.cancel()
         ticker = null
         queueIds.clear()
+        _queue.value = PlayerQueueState()
+        queueDirty = true
         controller?.let {
             it.removeListener(listener)
             it.release()
@@ -283,6 +361,20 @@ class PlayerController(
     }
 
     private fun TrackItem.toMediaItem(): MediaItem = AutoLibrary.trackItem(this)
+
+    private fun MediaItem.toTrackItem(): TrackItem {
+        val metadata = mediaMetadata
+        return TrackItem(
+            bvid = mediaId,
+            title = metadata.title?.toString().orEmpty().ifBlank { mediaId },
+            cover = metadata.artworkUri?.toString().orEmpty(),
+            upper = metadata.artist?.toString().orEmpty(),
+            duration = metadata.durationMs
+                ?.takeIf { it > 0L }
+                ?.let { (it / 1000L).toInt() }
+                ?: 0,
+        )
+    }
 
     private companion object {
         /** 每次 addMediaItems 的批量大小：太大可能触发 Binder 事务上限。 */

@@ -1081,6 +1081,8 @@ async function playTrackNow(track) {
   $('quality').textContent = '解析中…';
   // 与详情页共用 560px 封面：同一个 Promise，两处同帧出现
   applyCoverElement($('now-cover'), track.cover, COVER_CURRENT_SIZE);
+  // 详情页关着时先把大封面准备好，打开时飞行动画才有落点
+  if (!npOpen()) npApplyCover(track.cover || '');
   $('stats').textContent = '正在探测 CDN 节点…';
   document.querySelectorAll('.track').forEach((el) => {
     el.classList.toggle('active', el.dataset.bvid === track.bvid);
@@ -1816,33 +1818,331 @@ function npRenderAll() {
   npDrawSpark();
 }
 
+/* ------------------------------------------------------------------ 详情过渡
+   打开：底部播放条的小封面先被复制一份，飞到详情页大封面的位置；外框淡入，
+   顶栏 / 走带 / 队列错峰浮入。关闭时原路飞回。
+   动效全部走 Web Animations API，桌面壳（WebView2）和浏览器表现一致；
+   系统启用「减少动态效果」时跳过，直接显示 / 隐藏。 */
+
+const NP_ENTER_MS = 420;
+const NP_LEAVE_MS = 260;
+const NP_MOTION_EASE = 'cubic-bezier(0.22, 0.9, 0.26, 1)';
+
+let npMotionToken = 0;
+let npMotionAnims = [];
+let npClosing = false;
+let npCloseTimer = null;
+let npCoverTimer = null;
+let npAfterClose = null;
+
+function npMotionAvailable() {
+  return typeof Element.prototype.animate === 'function'
+    && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** 停掉上一轮过渡，清掉飞行封面；返回本轮令牌，过期的异步回调靠它作废。 */
+function npStopMotion() {
+  npMotionToken += 1;
+  clearTimeout(npCloseTimer);
+  npCloseTimer = null;
+  clearTimeout(npCoverTimer);
+  npCoverTimer = null;
+  npMotionAnims.forEach((anim) => {
+    try { anim.cancel(); } catch (_) { /* 已经播完 */ }
+  });
+  npMotionAnims = [];
+  document.querySelectorAll('.np-cover-fly').forEach((node) => node.remove());
+  $('now-playing').classList.remove('is-closing');
+  $('np-art').style.opacity = '';
+  return npMotionToken;
+}
+
+function npTrackMotion(anim) {
+  npMotionAnims.push(anim);
+  return anim;
+}
+
+/** 关闭前抓一份当前动效状态：入场没播完就按 Esc 时，从眼前这一帧接着退场。 */
+function npMotionSnapshot() {
+  const overlay = $('now-playing');
+  const read = (el) => {
+    if (!el) return null;
+    const style = getComputedStyle(el);
+    return { opacity: style.opacity, transform: style.transform };
+  };
+  const fly = document.querySelector('.np-cover-fly');
+  const flyStyle = fly ? getComputedStyle(fly) : null;
+  return {
+    overlay: read(overlay),
+    header: read(overlay.querySelector('.np-header')),
+    deck: read(overlay.querySelector('.np-console')),
+    queue: read(overlay.querySelector('.np-queue-rail')),
+    fly: fly ? {
+      rect: fly.getBoundingClientRect(),
+      image: flyStyle.backgroundImage,
+      radius: flyStyle.borderRadius,
+      shadow: flyStyle.boxShadow,
+    } : null,
+  };
+}
+
+/**
+ * 把小封面的截图从 fromEl 的矩形送到 toEl 的矩形。
+ * 位置走 transform，宽高与圆角单独插值，避免整体 scale 时圆角被一起放大。
+ * 封面图可能挂在子元素上（详情页的 .np-art-cover），所以允许单独指定 imageEl。
+ */
+function npCoverFlight(fromEl, toEl, duration, imageEl = fromEl) {
+  const fromStyle = getComputedStyle(fromEl);
+  const image = getComputedStyle(imageEl).backgroundImage;
+  if (!image || image === 'none') return null;
+  return npCoverFlightFromRect(
+    fromEl.getBoundingClientRect(),
+    image,
+    fromStyle.borderRadius,
+    fromStyle.boxShadow,
+    toEl,
+    duration,
+  );
+}
+
+/** 从任意矩形起飞：中途打断入场时，接着飞行副本当前的位置往回飞。 */
+function npCoverFlightFromRect(from, image, radius, shadow, toEl, duration) {
+  const to = toEl.getBoundingClientRect();
+  if (from.width < 8 || to.width < 8) return null;
+
+  const fly = document.createElement('div');
+  fly.className = 'np-cover-fly';
+  fly.style.left = `${from.left}px`;
+  fly.style.top = `${from.top}px`;
+  fly.style.width = `${from.width}px`;
+  fly.style.height = `${from.height}px`;
+  fly.style.borderRadius = radius;
+  fly.style.backgroundImage = image;
+  fly.style.boxShadow = shadow;
+  document.body.append(fly);
+
+  const toStyle = getComputedStyle(toEl);
+  const anim = fly.animate([
+    {
+      transform: 'translate(0, 0)',
+      width: `${from.width}px`,
+      height: `${from.height}px`,
+      borderRadius: radius,
+      boxShadow: shadow,
+    },
+    {
+      transform: `translate(${to.left - from.left}px, ${to.top - from.top}px)`,
+      width: `${to.width}px`,
+      height: `${to.height}px`,
+      borderRadius: toStyle.borderRadius,
+      boxShadow: toStyle.boxShadow,
+    },
+  ], { duration, easing: NP_MOTION_EASE, fill: 'both' });
+  return { fly, anim, target: toEl };
+}
+
+/** 飞行落点后把真封面亮出来，再让副本淡出，边缘不会闪。 */
+function npLandCover(flight, token) {
+  const land = () => {
+    if (token !== npMotionToken) return;
+    flight.target.style.opacity = '1';
+    const fade = flight.fly.animate([{ opacity: 1 }, { opacity: 0 }], {
+      duration: 100,
+      easing: 'linear',
+      fill: 'forwards',
+    });
+    fade.finished.catch(() => {}).then(() => {
+      if (token === npMotionToken) flight.fly.remove();
+    });
+  };
+  flight.anim.finished.then(land, land);
+}
+
+function npEnterMotion(token) {
+  const overlay = $('now-playing');
+  const header = overlay.querySelector('.np-header');
+  const deck = overlay.querySelector('.np-console');
+  const queue = overlay.querySelector('.np-queue-rail');
+  const art = $('np-art');
+
+  npTrackMotion(overlay.animate(
+    [{ opacity: 0 }, { opacity: 1 }],
+    { duration: 180, easing: 'ease-out', fill: 'both' },
+  ));
+
+  const flight = npCoverFlight($('now-cover'), art, NP_ENTER_MS);
+  if (flight) {
+    art.style.opacity = '0';
+    npLandCover(flight, token);
+    // 页面被切到后台时动画可能停住，兜底把飞行副本收掉，避免一直悬着
+    clearTimeout(npCoverTimer);
+    npCoverTimer = setTimeout(() => {
+      if (token !== npMotionToken) return;
+      npCoverTimer = null;
+      const node = document.querySelector('.np-cover-fly');
+      if (node) node.remove();
+      art.style.opacity = '1';
+    }, NP_ENTER_MS + 380);
+  } else {
+    // 没有封面可飞（纯演示 / 封面缺失）时，大封面自己轻轻浮上来
+    npTrackMotion(art.animate(
+      [
+        { opacity: 0, transform: 'translateY(10px) scale(0.97)' },
+        { opacity: 1, transform: 'none' },
+      ],
+      { duration: 360, delay: 40, easing: NP_MOTION_EASE, fill: 'both' },
+    ));
+  }
+
+  npTrackMotion(header.animate(
+    [
+      { opacity: 0, transform: 'translateY(-10px)' },
+      { opacity: 1, transform: 'none' },
+    ],
+    { duration: 300, delay: 120, easing: NP_MOTION_EASE, fill: 'both' },
+  ));
+
+  npTrackMotion(deck.animate(
+    [
+      { opacity: 0, transform: 'translateY(16px)' },
+      { opacity: 1, transform: 'none' },
+    ],
+    { duration: 330, delay: 150, easing: NP_MOTION_EASE, fill: 'both' },
+  ));
+
+  if (queue && queue.getBoundingClientRect().width > 0
+    && getComputedStyle(queue).visibility !== 'hidden') {
+    npTrackMotion(queue.animate(
+      [
+        { opacity: 0, transform: 'translateX(18px)' },
+        { opacity: 1, transform: 'none' },
+      ],
+      { duration: 310, delay: 180, easing: NP_MOTION_EASE, fill: 'both' },
+    ));
+  }
+}
+
+function npLeaveMotion(token, snapshot = null) {
+  const overlay = $('now-playing');
+  const header = overlay.querySelector('.np-header');
+  const deck = overlay.querySelector('.np-console');
+  const queue = overlay.querySelector('.np-queue-rail');
+  const art = $('np-art');
+  const overlayFrom = snapshot && snapshot.overlay ? snapshot.overlay.opacity : '1';
+  const headerFrom = (snapshot && snapshot.header) || { opacity: '1', transform: 'none' };
+  const deckFrom = (snapshot && snapshot.deck) || { opacity: '1', transform: 'none' };
+  const queueFrom = (snapshot && snapshot.queue) || { opacity: '1', transform: 'none' };
+
+  overlay.classList.add('is-closing');
+
+  const flight = snapshot && snapshot.fly
+    ? npCoverFlightFromRect(
+      snapshot.fly.rect,
+      snapshot.fly.image,
+      snapshot.fly.radius,
+      snapshot.fly.shadow,
+      $('now-cover'),
+      NP_LEAVE_MS,
+    )
+    : npCoverFlight(art, $('now-cover'), NP_LEAVE_MS, $('np-art-cover'));
+  if (flight) art.style.opacity = '0';
+
+  npTrackMotion(overlay.animate(
+    [{ opacity: overlayFrom }, { opacity: 0 }],
+    { duration: 160, delay: 80, easing: 'ease-in', fill: 'both' },
+  ));
+
+  npTrackMotion(header.animate(
+    [
+      { opacity: headerFrom.opacity, transform: headerFrom.transform },
+      { opacity: 0, transform: 'translateY(-8px)' },
+    ],
+    { duration: 90, easing: 'ease-in', fill: 'both' },
+  ));
+
+  npTrackMotion(deck.animate(
+    [
+      { opacity: deckFrom.opacity, transform: deckFrom.transform },
+      { opacity: 0, transform: 'translateY(12px)' },
+    ],
+    { duration: 90, easing: 'ease-in', fill: 'both' },
+  ));
+
+  if (queue && queue.getBoundingClientRect().width > 0
+    && getComputedStyle(queue).visibility !== 'hidden') {
+    npTrackMotion(queue.animate(
+      [
+        { opacity: queueFrom.opacity, transform: queueFrom.transform },
+        { opacity: 0, transform: 'translateX(14px)' },
+      ],
+      { duration: 90, easing: 'ease-in', fill: 'both' },
+    ));
+  }
+
+  npCloseTimer = setTimeout(() => npFinishClose(token), NP_LEAVE_MS + 40);
+}
+
+function npFinishClose(token) {
+  if (token !== npMotionToken) return;
+  const overlay = $('now-playing');
+  npClosing = false;
+  npCloseTimer = null;
+  clearTimeout(npCoverTimer);
+  npCoverTimer = null;
+  overlay.classList.add('hidden');
+  overlay.classList.remove('np-queue-open', 'is-closing', 'np-motion');
+  $('app').removeAttribute('inert');
+  $('player').removeAttribute('inert');
+  $('np-art').style.opacity = '';
+  document.querySelectorAll('.np-cover-fly').forEach((node) => node.remove());
+  npMotionAnims.forEach((anim) => {
+    try { anim.cancel(); } catch (_) { /* 已经播完 */ }
+  });
+  npMotionAnims = [];
+  const target = npReturnFocus;
+  npReturnFocus = null;
+  if (target && typeof target.focus === 'function' && document.contains(target)) {
+    target.focus({ preventScroll: true });
+  }
+  const after = npAfterClose;
+  npAfterClose = null;
+  if (after) after();
+}
+
 function openNowPlaying() {
-  if (npOpen() || !state.nowTrack) return;
+  if (npOpen() || npClosing || !state.nowTrack) return;
   const active = document.activeElement;
   npReturnFocus = active && active !== document.body ? active : $('open-now-playing');
+  npAfterClose = null;
+  const token = npStopMotion();
+  const animate = npMotionAvailable();
+  // 先挂上 np-motion，确保 display 变化时兜底的 np-in 不会和 JS 动效叠加
+  if (animate) $('now-playing').classList.add('np-motion');
   $('now-playing').classList.remove('hidden');
   $('app').setAttribute('inert', '');
   $('player').setAttribute('inert', '');
   npSetEngine(false);
   npSetQueue(!npQueueIsOverlay());
   npRenderAll();
+  if (animate) npEnterMotion(token);
   setTimeout(() => {
     if (npOpen()) $('np-play').focus({ preventScroll: true });
   }, 30);
 }
 
-function closeNowPlaying() {
-  if (!npOpen()) return;
+function closeNowPlaying({ after = null } = {}) {
+  if (!npOpen() || npClosing) return;
   if (npEngineOpen()) npSetEngine(false);
-  $('now-playing').classList.add('hidden');
-  $('now-playing').classList.remove('np-queue-open');
-  $('app').removeAttribute('inert');
-  $('player').removeAttribute('inert');
-  const target = npReturnFocus;
-  npReturnFocus = null;
-  if (target && typeof target.focus === 'function' && document.contains(target)) {
-    target.focus({ preventScroll: true });
+  const animate = npMotionAvailable();
+  const snapshot = animate ? npMotionSnapshot() : null;
+  const token = npStopMotion();
+  npClosing = true;
+  npAfterClose = typeof after === 'function' ? after : null;
+  if (!animate) {
+    npFinishClose(token);
+    return;
   }
+  npLeaveMotion(token, snapshot);
 }
 
 /* ---------------------------------------------------------------- 行为 */
@@ -2884,9 +3184,12 @@ document.addEventListener('keydown', (evt) => {
     if (evt.code === 'Tab') { trapNpFocus(evt); return; }
     if ((evt.ctrlKey || evt.metaKey) && evt.code === 'KeyK') {
       evt.preventDefault();
-      closeNowPlaying();
-      $('search').focus();
-      $('search').select();
+      closeNowPlaying({
+        after: () => {
+          $('search').focus();
+          $('search').select();
+        },
+      });
       return;
     }
   }

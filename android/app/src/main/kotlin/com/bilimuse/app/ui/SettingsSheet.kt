@@ -399,7 +399,7 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun BottomSheetDragHandle() {
+internal fun BottomSheetDragHandle() {
     Box(
         Modifier
             .padding(vertical = 10.dp)

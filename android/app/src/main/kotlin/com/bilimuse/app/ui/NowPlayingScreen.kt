@@ -39,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,12 +59,14 @@ import coil.compose.AsyncImage
 import com.bilimuse.app.R
 import com.bilimuse.app.ShufflePoolState
 import com.bilimuse.app.btr.EngineSnapshot
+import com.bilimuse.app.player.PlayQueueUiState
 import com.bilimuse.app.player.PlayerUiState
 import kotlin.math.roundToInt
 
 @Composable
 fun NowPlayingScreen(
     state: PlayerUiState,
+    queue: PlayQueueUiState,
     showBtrDetails: Boolean,
     shufflePool: ShufflePoolState,
     onBack: () -> Unit,
@@ -73,7 +76,10 @@ fun NowPlayingScreen(
     onSeek: (Long) -> Unit,
     onRepeatMode: (Int) -> Unit,
     onShuffle: (Boolean) -> Unit,
+    onPlayQueueIndex: (Int) -> Unit,
+    onLoadMoreQueue: () -> Unit,
 ) {
+    var queueOpen by rememberSaveable { mutableStateOf(false) }
     Box(
         Modifier
             .fillMaxSize()
@@ -106,13 +112,15 @@ fun NowPlayingScreen(
                 .padding(horizontal = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Row(
+            Box(
                 Modifier
                     .fillMaxWidth()
-                    .padding(top = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .height(48.dp),
             ) {
-                IconButton(onClick = onBack) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.align(Alignment.CenterStart),
+                ) {
                     Icon(
                         Icons.Filled.ArrowBack,
                         contentDescription = "返回",
@@ -123,15 +131,31 @@ fun NowPlayingScreen(
                     text = "正在播放",
                     style = MaterialTheme.typography.labelLarge,
                     color = BiliMuted,
-                    modifier = Modifier.weight(1f),
-                    textAlign = TextAlign.Center,
+                    modifier = Modifier.align(Alignment.Center),
                 )
-                Box(
-                    Modifier.widthIn(min = 48.dp),
-                    contentAlignment = Alignment.CenterEnd,
+                Row(
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     val quality = state.info?.quality
-                    if (!quality.isNullOrBlank()) InfoChip(quality, BiliPink)
+                    if (!quality.isNullOrBlank()) {
+                        InfoChip(quality, BiliPink)
+                        Spacer(Modifier.size(2.dp))
+                    }
+                    IconButton(
+                        onClick = { queueOpen = true },
+                        enabled = queue.items.isNotEmpty(),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_queue_music),
+                            contentDescription = "播放队列，共 ${queue.items.size} 首",
+                            tint = if (queue.items.isNotEmpty()) {
+                                BiliText
+                            } else {
+                                BiliMuted.copy(alpha = 0.35f)
+                            },
+                        )
+                    }
                 }
             }
 
@@ -230,6 +254,16 @@ fun NowPlayingScreen(
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(20.dp))
+        }
+
+        if (queueOpen) {
+            PlayQueueSheet(
+                state = queue,
+                isPlaying = state.isPlaying,
+                onDismiss = { queueOpen = false },
+                onPlayIndex = onPlayQueueIndex,
+                onLoadMore = onLoadMoreQueue,
+            )
         }
     }
 }
