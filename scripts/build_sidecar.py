@@ -31,6 +31,28 @@ EXT = ".exe" if IS_WINDOWS else ""
 DATA_SEP = ";" if IS_WINDOWS else ":"
 
 
+def _configure_stdio() -> None:
+    """让日志始终打得出来。
+
+    Windows 上 stdout 被 tauri 接成管道时用的是系统代码页（英文版 CI 是 cp1252），
+    中文日志会直接抛 UnicodeEncodeError 把构建打挂；macOS / Linux 默认 UTF-8
+    不会有这个问题。交互式终端保留系统编码，免得本地 cmd / PowerShell 里变乱码。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream is None:
+                continue
+            if stream.isatty():
+                stream.reconfigure(errors="replace")
+            else:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
+_configure_stdio()
+
+
 def fail(message: str) -> NoReturn:
     print(f"[sidecar] {message}", file=sys.stderr)
     raise SystemExit(1)
