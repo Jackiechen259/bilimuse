@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -69,6 +70,7 @@ fun SettingsSheet(
     onChunkSize: (Int) -> Unit,
     onLossless: (Boolean) -> Unit,
     onShowBtrDetails: (Boolean) -> Unit,
+    onMotionEnabled: (Boolean) -> Unit,
     onAutoCheckUpdates: (Boolean) -> Unit,
     onCheckUpdate: () -> Unit,
     onOpenUpdate: () -> Unit,
@@ -85,6 +87,9 @@ fun SettingsSheet(
             Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
+                // 设置页内容长时会把 bottom sheet 撑到全屏，不补状态栏内边距的话
+                // 标题会和状态栏图标叠在一起。
+                .statusBarsPadding()
                 .padding(horizontal = 20.dp)
                 .navigationBarsPadding()
                 .padding(bottom = 20.dp),
@@ -208,6 +213,16 @@ fun SettingsSheet(
                 description = "关闭后播放页隐藏引擎与分块卡片",
                 checked = settings.showBtrDetails,
                 onCheckedChange = onShowBtrDetails,
+            )
+
+            Spacer(Modifier.height(22.dp))
+            SectionTitle("界面")
+
+            SettingSwitch(
+                title = "界面动效",
+                description = "封面视差、错峰入场与页面转场；系统关闭动画时自动停用",
+                checked = settings.motionEnabled,
+                onCheckedChange = onMotionEnabled,
             )
 
             Spacer(Modifier.height(22.dp))

@@ -93,6 +93,8 @@ data class EngineSettings(
     val chunkSize: Int = 512 * 1024,
     val preferLossless: Boolean = true,
     val showBtrDetails: Boolean = true,
+    /** 封面视差、错峰入场等界面动效；系统关闭动画时仍会自动停用。 */
+    val motionEnabled: Boolean = true,
     /** 本机选择隐藏的收藏夹；新收藏夹默认可见。 */
     val hiddenFolderIds: Set<Long> = emptySet(),
 ) {

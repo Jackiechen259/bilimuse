@@ -14,6 +14,7 @@
         --muted: #9a948a;
         --paper: #f2f0ea;
         --ink: #0b0b0c;
+        --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
       }
 
       * { box-sizing: border-box; }
@@ -45,6 +46,16 @@
           "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
         user-select: none;
         overflow: hidden;
+      }
+
+      /* 四周压暗，把注意力收在中间那枚唱片套上 */
+      body::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background: radial-gradient(64% 56% at 50% 48%, transparent 58%, rgba(0, 0, 0, 0.34));
       }
 
       /* 无边框窗口的启动页标题栏：和进入主界面后一样，拖动/双击都落在这一条上 */
@@ -133,6 +144,8 @@
       .chrome-btn.is-maximized .glyph-restore { display: block; }
 
       .stage {
+        position: relative;
+        z-index: 1;
         flex: 1;
         display: grid;
         place-items: center;
@@ -140,6 +153,8 @@
       }
 
       .splash {
+        position: relative;
+        isolation: isolate;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -148,18 +163,50 @@
         text-align: center;
       }
 
+      /* 标志背后缓慢呼吸的柔光，让启动页不是一块死黑 */
+      .splash::before {
+        content: "";
+        position: absolute;
+        z-index: -1;
+        left: 50%;
+        top: 34%;
+        width: 300px;
+        height: 300px;
+        margin: -150px 0 0 -150px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(242, 240, 234, 0.09), transparent 68%);
+        filter: blur(14px);
+        animation: glow-breathe 6.4s ease-in-out infinite;
+        pointer-events: none;
+      }
+
+      .mark-wrap {
+        display: grid;
+        place-items: center;
+        animation: float 5.6s ease-in-out infinite;
+      }
+
       .mark {
         width: 96px;
         height: 96px;
         filter: drop-shadow(0 18px 40px rgba(0, 0, 0, 0.5));
-        animation: float 4.5s ease-in-out infinite;
+        animation: mark-in 0.9s var(--ease-out) both;
       }
+
+      .ring {
+        transform-box: fill-box;
+        transform-origin: center;
+      }
+
+      .ring-outer { animation: ring-spin 28s linear infinite; }
+      .ring-inner { animation: ring-spin 19s linear infinite reverse; }
 
       h1 {
         margin: 6px 0 0;
         font-size: 22px;
         font-weight: 650;
         letter-spacing: 0.3px;
+        animation: rise-in 0.62s var(--ease-out) 0.14s both;
       }
 
       .tagline {
@@ -167,6 +214,7 @@
         color: var(--muted);
         font-size: 12.5px;
         letter-spacing: 0.4px;
+        animation: rise-in 0.62s var(--ease-out) 0.22s both;
       }
 
       .status {
@@ -182,6 +230,7 @@
         font-size: 12.5px;
         max-width: 560px;
         transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+        animation: rise-in 0.62s var(--ease-out) 0.3s both;
       }
 
       .status.error {
@@ -211,13 +260,23 @@
         position: fixed;
         left: 0;
         top: 40px;
+        z-index: 2;
         height: 2px;
-        width: 36%;
-        background: linear-gradient(90deg, transparent, rgba(242, 240, 234, 0.8), transparent);
-        opacity: 0.45;
-        animation: slide 1.6s ease-in-out infinite;
+        width: 32%;
+        background: linear-gradient(90deg, transparent, rgba(242, 240, 234, 0.95), transparent);
+        box-shadow: 0 0 14px 1px rgba(242, 240, 234, 0.16);
+        opacity: 0.78;
+        animation: slide 1.5s cubic-bezier(0.45, 0, 0.55, 1) infinite;
         pointer-events: none;
       }
+
+      body.has-error .bar {
+        animation: none;
+        width: 100%;
+        opacity: 0.12;
+      }
+
+      body.has-error .splash::before { animation: none; }
 
       @keyframes pulse {
         0% { box-shadow: 0 0 0 0 rgba(242, 240, 234, 0.35); opacity: 1; }
@@ -231,12 +290,41 @@
       }
 
       @keyframes slide {
-        0% { transform: translateX(-40%); }
-        100% { transform: translateX(300%); }
+        0% { transform: translateX(-110%); }
+        100% { transform: translateX(380%); }
+      }
+
+      @keyframes mark-in {
+        from { opacity: 0; transform: scale(0.86) rotate(-7deg); }
+      }
+
+      @keyframes ring-spin {
+        to { transform: rotate(360deg); }
+      }
+
+      @keyframes rise-in {
+        from { opacity: 0; transform: translateY(8px); }
+      }
+
+      @keyframes glow-breathe {
+        0%, 100% { opacity: 0.55; transform: scale(0.94); }
+        50% { opacity: 1; transform: scale(1.06); }
       }
 
       @media (prefers-reduced-motion: reduce) {
-        .mark, .dot, .bar { animation: none; }
+        .mark,
+        .mark-wrap,
+        .ring,
+        .dot,
+        .bar,
+        .splash::before,
+        .splash h1,
+        .splash .tagline,
+        .splash .status { animation: none; }
+        .bar { width: 100%; opacity: 0.12; }
+        .splash h1,
+        .splash .tagline,
+        .splash .status { opacity: 1; transform: none; }
       }
     </style>
   </head>
@@ -280,18 +368,22 @@
 
     <div class="stage">
       <main class="splash">
-        <svg class="mark" viewBox="0 0 108 108" fill="none" aria-hidden="true">
-          <rect width="108" height="108" rx="24" fill="#F2F0EA" />
-          <circle cx="54" cy="54" r="31.5" fill="none" stroke="#0B0B0C" stroke-opacity="0.14" stroke-width="0.8" />
-          <circle cx="54" cy="54" r="23.6" fill="none" stroke="#0B0B0C" stroke-opacity="0.1" stroke-width="0.8" />
-          <g transform="translate(-0.5 1)" fill="#0B0B0C">
-            <ellipse cx="43.5" cy="66" rx="9.4" ry="7.1" transform="rotate(-20 43.5 66)" />
-            <ellipse cx="64" cy="62" rx="9.4" ry="7.1" transform="rotate(-20 64 62)" />
-            <rect x="48.4" y="34" width="5.2" height="32" rx="2.6" />
-            <rect x="69" y="30.2" width="5.2" height="32" rx="2.6" />
-            <path d="M48.4 34 L74.2 30.2 L74.2 37 L48.4 40.8 Z" />
-          </g>
-        </svg>
+        <div class="mark-wrap">
+          <svg class="mark" viewBox="0 0 108 108" fill="none" aria-hidden="true">
+            <rect width="108" height="108" rx="24" fill="#F2F0EA" />
+            <circle class="ring ring-outer" cx="54" cy="54" r="31.5" fill="none" stroke="#0B0B0C"
+              stroke-opacity="0.14" stroke-width="0.8" stroke-dasharray="2 7" />
+            <circle class="ring ring-inner" cx="54" cy="54" r="23.6" fill="none" stroke="#0B0B0C"
+              stroke-opacity="0.1" stroke-width="0.8" stroke-dasharray="1.5 5.5" />
+            <g transform="translate(-0.5 1)" fill="#0B0B0C">
+              <ellipse cx="43.5" cy="66" rx="9.4" ry="7.1" transform="rotate(-20 43.5 66)" />
+              <ellipse cx="64" cy="62" rx="9.4" ry="7.1" transform="rotate(-20 64 62)" />
+              <rect x="48.4" y="34" width="5.2" height="32" rx="2.6" />
+              <rect x="69" y="30.2" width="5.2" height="32" rx="2.6" />
+              <path d="M48.4 34 L74.2 30.2 L74.2 37 L48.4 40.8 Z" />
+            </g>
+          </svg>
+        </div>
 
         <h1>BiliMuse</h1>
         <p class="tagline">把收藏夹变成歌单 · 本地播放器</p>
@@ -308,6 +400,7 @@
       window.__bilimuseError = function (message) {
         var box = document.getElementById('status');
         var text = document.getElementById('status-text');
+        document.body.classList.add('has-error');
         box.classList.add('error');
         text.textContent = message;
       };

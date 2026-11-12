@@ -1,15 +1,25 @@
 package com.bilimuse.app.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,25 +31,35 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -49,6 +69,45 @@ import coil.compose.AsyncImage
 import com.bilimuse.app.R
 import com.bilimuse.app.player.PlayerUiState
 import kotlin.math.absoluteValue
+
+/**
+ * 带按下回弹的图标键：用于顶栏、播放页走带和弹层关闭键。
+ *
+ * 保留系统涟漪（[LocalIndication]），按下时只做 0.86 的图层缩放，不改变点击区域。
+ */
+@Composable
+fun MotionIconButton(
+    onClick: () -> Unit,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tint: Color = BiliText,
+    content: @Composable () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    Box(
+        modifier = modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .clickable(
+                enabled = enabled,
+                role = Role.Button,
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            )
+            .pressScale(interactionSource, pressedScale = 0.86f)
+            .semantics {
+                this.contentDescription = contentDescription
+                this.role = Role.Button
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides tint) {
+            content()
+        }
+    }
+}
 
 fun formatTime(ms: Long): String {
     val seconds = (ms.coerceAtLeast(0L) / 1000L)
@@ -128,26 +187,44 @@ fun PlayingBars(
     color: Color = BiliPink,
     modifier: Modifier = Modifier,
 ) {
-    val transition = rememberInfiniteTransition(label = "playing-bars")
-    val first by transition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(380, easing = LinearEasing), RepeatMode.Reverse),
-        label = "bar1",
-    )
-    val second by transition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.3f,
-        animationSpec = infiniteRepeatable(tween(520, easing = LinearEasing), RepeatMode.Reverse),
-        label = "bar2",
-    )
-    val third by transition.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 0.9f,
-        animationSpec = infiniteRepeatable(tween(300, easing = LinearEasing), RepeatMode.Reverse),
-        label = "bar3",
-    )
-    val levels = if (active) listOf(first, second, third) else listOf(0.35f, 0.8f, 0.55f)
+    val motion = LocalMotion.current
+    val animate = motion.enabled && active
+    val levels = if (animate) {
+        val transition = rememberInfiniteTransition(label = "playing-bars")
+        val first by transition.animateFloat(
+            initialValue = 0.22f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                tween(460, easing = FastOutSlowInEasing),
+                RepeatMode.Reverse,
+            ),
+            label = "bar1",
+        )
+        val second by transition.animateFloat(
+            initialValue = 0.95f,
+            targetValue = 0.26f,
+            animationSpec = infiniteRepeatable(
+                tween(620, easing = FastOutSlowInEasing),
+                RepeatMode.Reverse,
+            ),
+            label = "bar2",
+        )
+        val third by transition.animateFloat(
+            initialValue = 0.4f,
+            targetValue = 0.92f,
+            animationSpec = infiniteRepeatable(
+                tween(360, easing = FastOutSlowInEasing),
+                RepeatMode.Reverse,
+            ),
+            label = "bar3",
+        )
+        listOf(first, second, third)
+    } else if (active) {
+        // 系统关闭动画时仍然保留「正在播放」的静态标识。
+        listOf(0.92f, 0.62f, 0.8f)
+    } else {
+        listOf(0.32f, 0.22f, 0.28f)
+    }
     Canvas(modifier.size(18.dp, 16.dp)) {
         val barWidth = size.width / 5f
         val gap = barWidth / 2f
@@ -233,21 +310,37 @@ fun ProgressLine(
     modifier: Modifier = Modifier,
     color: Color = BiliPink,
     track: Color = Color.White.copy(alpha = 0.07f),
+    resetKey: Any? = Unit,
 ) {
-    val value = progress.coerceIn(0f, 1f)
+    val motion = LocalMotion.current
+    val target = progress.coerceIn(0f, 1f)
+    // resetKey 变化（换歌）时直接对齐新进度，避免旧进度条倒着退回去。
+    val value = remember(resetKey) { Animatable(target) }
+    LaunchedEffect(target, resetKey, motion.enabled) {
+        if (motion.enabled) {
+            // 进度回传是 500ms 一跳，用同长的线性补间把跳跃磨平；暂停 / 拖动时也不会过冲。
+            value.animateTo(target, motion.tween(560, easing = LinearEasing))
+        } else {
+            value.snapTo(target)
+        }
+    }
     Box(
         modifier = modifier
             .height(3.dp)
             .clip(RoundedCornerShape(2.dp))
             .background(track),
     ) {
-        if (value > 0f) {
+        if (value.value > 0f) {
             Box(
                 Modifier
-                    .fillMaxWidth(value)
+                    .fillMaxWidth(value.value)
                     .height(3.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(color),
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(color.copy(alpha = 0.72f), color),
+                        ),
+                    ),
             )
         }
     }
@@ -260,6 +353,7 @@ fun MiniPlayer(
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
 ) {
+    val motion = LocalMotion.current
     val progress = if (state.durationMs > 0L) {
         state.positionMs.toFloat() / state.durationMs
     } else {
@@ -268,10 +362,17 @@ fun MiniPlayer(
     Column(
         Modifier
             .fillMaxWidth()
-            .background(BiliPanel.copy(alpha = 0.98f))
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        BiliPanel.copy(alpha = 0.99f),
+                        BiliPanel2.copy(alpha = 0.98f),
+                    ),
+                ),
+            )
             .navigationBarsPadding(),
     ) {
-        ProgressLine(progress, Modifier.fillMaxWidth(), color = BiliPink)
+        ProgressLine(progress, Modifier.fillMaxWidth(), color = BiliPink, resetKey = state.bvid)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -279,7 +380,21 @@ fun MiniPlayer(
                 .padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CoverArt(state.cover, 44.dp, 10.dp)
+            AnimatedContent(
+                targetState = state.cover,
+                transitionSpec = {
+                    (fadeIn(motion.tween(360, delayMs = 40, easing = MotionEase.OutExpo)) +
+                        scaleIn(
+                            initialScale = 1.08f,
+                            animationSpec = motion.tween(520, easing = MotionEase.OutExpo),
+                        )).togetherWith(
+                        fadeOut(motion.tween(240, easing = MotionEase.InOut)),
+                    )
+                },
+                label = "mini-cover",
+            ) { cover ->
+                CoverArt(cover, 44.dp, 10.dp)
+            }
             Column(
                 Modifier
                     .weight(1f)
@@ -292,33 +407,94 @@ fun MiniPlayer(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(2.dp))
-                Text(
-                    text = when {
-                        state.isBuffering -> "缓冲中…"
-                        state.upper.isBlank() -> "BiliMuse"
-                        else -> state.upper
+                val subtitle = when {
+                    state.isBuffering -> "缓冲中…"
+                    state.upper.isBlank() -> "BiliMuse"
+                    else -> state.upper
+                }
+                AnimatedContent(
+                    targetState = subtitle,
+                    transitionSpec = {
+                        fadeIn(motion.tween(220)).togetherWith(fadeOut(motion.tween(140)))
                     },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = BiliMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                    label = "mini-subtitle",
+                ) { text ->
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (state.isBuffering) BiliBlue else BiliMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-            IconButton(onClick = onTogglePlay) {
-                Icon(
-                    painter = painterResource(
-                        if (state.isPlaying) R.drawable.ic_pause else R.drawable.ic_play,
-                    ),
-                    contentDescription = if (state.isPlaying) "暂停" else "播放",
-                    tint = BiliText,
-                )
+            MiniTransportButton(
+                onClick = onTogglePlay,
+                contentDescription = if (state.isPlaying) "暂停" else "播放",
+            ) {
+                AnimatedContent(
+                    targetState = state.isPlaying,
+                    transitionSpec = {
+                        (fadeIn(motion.tween(150)) + scaleIn(
+                            initialScale = 0.62f,
+                            animationSpec = motion.spring(dampingRatio = 0.55f, stiffness = 760f),
+                        )).togetherWith(
+                            fadeOut(motion.tween(110)) + scaleOut(
+                                targetScale = 0.62f,
+                                animationSpec = motion.tween(110, easing = MotionEase.In),
+                            ),
+                        )
+                    },
+                    label = "mini-play-icon",
+                ) { playing ->
+                    Icon(
+                        painter = painterResource(
+                            if (playing) R.drawable.ic_pause else R.drawable.ic_play,
+                        ),
+                        contentDescription = null,
+                        tint = BiliText,
+                    )
+                }
             }
-            IconButton(onClick = onNext) {
+            MiniTransportButton(
+                onClick = onNext,
+                contentDescription = "下一首",
+            ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_skip_next),
-                    contentDescription = "下一首",
+                    contentDescription = null,
                     tint = BiliText,
                 )
+            }
+        }
+    }
+}
+
+/** 迷你播放条上的圆形图标键：按下收紧，松开回弹。 */
+@Composable
+private fun MiniTransportButton(
+    onClick: () -> Unit,
+    contentDescription: String,
+    content: @Composable () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = Color.Transparent,
+        contentColor = BiliText,
+        interactionSource = interactionSource,
+        modifier = Modifier
+            .size(42.dp)
+            .pressScale(interactionSource, pressedScale = 0.86f)
+            .semantics { this.contentDescription = contentDescription },
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.size(40.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                content()
             }
         }
     }
@@ -335,8 +511,7 @@ fun SkeletonRow() {
         Box(
             Modifier
                 .size(48.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(BiliPanel2),
+                .skeleton(RoundedCornerShape(10.dp)),
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -344,16 +519,14 @@ fun SkeletonRow() {
                 Modifier
                     .fillMaxWidth(0.75f)
                     .height(12.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(BiliPanel2),
+                    .skeleton(RoundedCornerShape(4.dp)),
             )
             Spacer(Modifier.height(8.dp))
             Box(
                 Modifier
                     .fillMaxWidth(0.4f)
                     .height(10.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(BiliPanel2),
+                    .skeleton(RoundedCornerShape(4.dp)),
             )
         }
     }

@@ -1,9 +1,20 @@
 package com.bilimuse.app.ui
 
 import android.graphics.Bitmap
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -42,12 +53,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.bilimuse.app.MainViewModel
 import com.bilimuse.app.data.QrInfo
 import com.google.zxing.BarcodeFormat
@@ -129,7 +140,7 @@ fun LoginDialog(
         }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    MotionDialog(onDismissRequest = onDismiss) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -161,6 +172,7 @@ fun LoginDialog(
                 }
                 Spacer(Modifier.height(16.dp))
 
+                val motion = LocalMotion.current
                 Box(
                     modifier = Modifier
                         .size(232.dp)
@@ -168,16 +180,62 @@ fun LoginDialog(
                         .background(Color.White),
                     contentAlignment = Alignment.Center,
                 ) {
-                    when {
-                        qrBitmap != null -> Image(
-                            bitmap = qrBitmap!!.asImageBitmap(),
-                            contentDescription = "登录二维码",
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(10.dp),
+                    AnimatedContent(
+                        targetState = qrBitmap,
+                        transitionSpec = {
+                            (fadeIn(motion.tween(320)) + scaleIn(
+                                initialScale = 0.94f,
+                                animationSpec = motion.tween(420, easing = MotionEase.OutExpo),
+                            )).togetherWith(
+                                fadeOut(motion.tween(180)),
+                            )
+                        },
+                        label = "login-qr",
+                    ) { bitmap ->
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "登录二维码",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(10.dp),
+                            )
+                        } else {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                if (loading) {
+                                    CircularProgressIndicator(color = BiliPink)
+                                } else {
+                                    Text("二维码不可用", color = Color(0xFF333333))
+                                }
+                            }
+                        }
+                    }
+                    // 等待扫码时有一条很淡的扫描线上下扫过；只是提示，不阻挡点击。
+                    if (qrBitmap != null && !expired && motion.enabled) {
+                        val transition = rememberInfiniteTransition(label = "qr-scan")
+                        val scan by transition.animateFloat(
+                            initialValue = 0f,
+                            targetValue = 1f,
+                            animationSpec = infiniteRepeatable(
+                                animation = androidx.compose.animation.core.tween(
+                                    durationMillis = 2400,
+                                    easing = LinearEasing,
+                                ),
+                                repeatMode = RepeatMode.Reverse,
+                            ),
+                            label = "qr-scan-line",
                         )
-                        loading -> CircularProgressIndicator(color = BiliPink)
-                        else -> Text("二维码不可用", color = Color(0xFF333333))
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(2.dp)
+                                .offset { androidx.compose.ui.unit.IntOffset(0, (scan * 232f * density).toInt()) }
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(Color.Transparent, BiliPink.copy(alpha = 0.7f), Color.Transparent),
+                                    ),
+                                ),
+                        )
                     }
                     if (expired) {
                         Box(
@@ -194,16 +252,24 @@ fun LoginDialog(
                 }
 
                 Spacer(Modifier.height(16.dp))
-                Text(
-                    text = status,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = when {
-                        error || expired -> BiliDanger
-                        status.contains("已扫码") -> BiliBlue
-                        else -> BiliText
+                AnimatedContent(
+                    targetState = status,
+                    transitionSpec = {
+                        fadeIn(motion.tween(220)) togetherWith fadeOut(motion.tween(140))
                     },
-                    textAlign = TextAlign.Center,
-                )
+                    label = "login-status",
+                ) { text ->
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = when {
+                            error || expired -> BiliDanger
+                            text.contains("已扫码") -> BiliBlue
+                            else -> BiliText
+                        },
+                        textAlign = TextAlign.Center,
+                    )
+                }
                 Spacer(Modifier.height(6.dp))
                 Text(
                     text = "登录态只保存在本机应用私有目录，不碰密码",

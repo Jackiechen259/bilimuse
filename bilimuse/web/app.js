@@ -3,6 +3,43 @@
 
 const $ = (id) => document.getElementById(id);
 
+/* ------------------------------------------------------------ 动效基础
+   所有 JS 驱动的动效都先过 motionAllowed()：系统的「减少动态效果」优先，
+   其次是 Web Animations API 是否可用（桌面壳的 WebView2 / 浏览器都支持）。
+   CSS 动效由样式表里的 prefers-reduced-motion 兜底。 */
+
+const MOTION_EASE_OUT = 'cubic-bezier(0.22, 1, 0.36, 1)';
+const MOTION_EASE_SPRING = 'cubic-bezier(0.34, 1.46, 0.64, 1)';
+const MOTION_EASE_IN = 'cubic-bezier(0.4, 0, 1, 1)';
+const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+function motionAllowed() {
+  return typeof Element.prototype.animate === 'function' && !motionQuery.matches;
+}
+
+/** 重启一个一次性的 CSS 动效类；同一元素上的定时器会互相覆盖。 */
+function restartClass(el, className, ms) {
+  if (!el) return;
+  el.classList.remove(className);
+  void el.offsetWidth;
+  el.classList.add(className);
+  el._motionTimers = el._motionTimers || {};
+  clearTimeout(el._motionTimers[className]);
+  el._motionTimers[className] = setTimeout(() => {
+    el.classList.remove(className);
+    delete el._motionTimers[className];
+  }, ms);
+}
+
+/** 换文字时只让新文字浮入一次；内容没变就不动。 */
+function swapText(el, text) {
+  if (!el) return;
+  const next = String(text == null ? '' : text);
+  if (el.textContent === next) return;
+  el.textContent = next;
+  if (motionAllowed()) restartClass(el, 'is-swapping', 460);
+}
+
 // B 站收藏夹列表接口的 ps 上限：超过 40 会返回 -400「请求错误」
 const FOLDER_PAGE_SIZE = 40;
 // B 站图片 CDN 支持 @宽_高_裁剪 后缀；列表 38px 没必要下载整张 16:9 原图。
@@ -60,6 +97,67 @@ function initTheme() {
   } catch (_) { /* 用默认主题 */ }
   const preset = document.documentElement.getAttribute('data-theme');
   applyTheme(THEMES.includes(preset) ? preset : theme, { persist: false });
+}
+
+/* 主题切换的「圆形揭示」：从被点击的圆点 / 卡片向外扩散。
+   View Transitions 在 Chromium 111+（桌面壳的 WebView2）可用；
+   WKWebView / 旧 WebKit 没有就退回瞬时切换，不影响任何功能。 */
+let themeTransition = null;
+
+function chooseTheme(theme, sourceEl) {
+  if (!THEMES.includes(theme) || theme === currentTheme()) return;
+  const fallback = () => {
+    applyTheme(theme);
+    persistTheme(theme);
+  };
+  if (!motionAllowed() || typeof document.startViewTransition !== 'function') {
+    fallback();
+    return;
+  }
+  if (themeTransition) {
+    try { themeTransition.skipTransition(); } catch (_) { /* 已经结束 */ }
+    themeTransition = null;
+  }
+
+  const rect = sourceEl && typeof sourceEl.getBoundingClientRect === 'function'
+    ? sourceEl.getBoundingClientRect()
+    : null;
+  const x = rect && rect.width ? rect.left + rect.width / 2 : window.innerWidth / 2;
+  const y = rect && rect.height ? rect.top + rect.height / 2 : window.innerHeight / 2;
+  const radius = Math.ceil(Math.hypot(
+    Math.max(x, window.innerWidth - x),
+    Math.max(y, window.innerHeight - y),
+  ));
+
+  let transition;
+  try {
+    transition = document.startViewTransition(() => {
+      applyTheme(theme);
+      persistTheme(theme);
+    });
+  } catch (_) {
+    fallback();
+    return;
+  }
+  themeTransition = transition;
+  transition.ready.then(() => {
+    document.documentElement.animate(
+      {
+        clipPath: [
+          `circle(0px at ${x}px ${y}px)`,
+          `circle(${radius}px at ${x}px ${y}px)`,
+        ],
+      },
+      {
+        duration: 560,
+        easing: MOTION_EASE_OUT,
+        pseudoElement: '::view-transition-new(root)',
+      },
+    );
+  }).catch(() => { /* 过渡被打断 */ });
+  transition.finished.catch(() => { /* 更新回调失败或被打断 */ }).finally(() => {
+    if (themeTransition === transition) themeTransition = null;
+  });
 }
 
 const SETTINGS_TABS = {
@@ -713,7 +811,7 @@ function clearFolderSelection(message) {
   state.tracksLoading = false;
   state.tracksError = '';
   $('search').value = '';
-  $('folder-title').textContent = '选择一个收藏夹';
+  swapText($('folder-title'), '选择一个收藏夹');
   $('folder-meta').textContent = message;
   renderTracks();
 }
@@ -748,6 +846,7 @@ function renderFolders() {
     return;
   }
 
+  let folderOrder = 0;
   for (const folder of visible) {
     const btn = document.createElement('button');
     btn.className = 'folder';
@@ -760,6 +859,16 @@ function renderFolders() {
     count.textContent = folder.count ? String(folder.count) : '';
     btn.append(name, count);
     btn.addEventListener('click', () => selectFolder(folder.id, folder.title));
+    if (motionAllowed() && folderOrder < 12) {
+      btn.classList.add('is-entering');
+      btn.style.setProperty('--folder-i', String(folderOrder));
+      btn.addEventListener('animationend', (evt) => {
+        if (evt.target === btn && evt.animationName === 'folder-enter') {
+          btn.classList.remove('is-entering');
+        }
+      });
+    }
+    folderOrder += 1;
     box.appendChild(btn);
   }
 
@@ -838,7 +947,7 @@ async function loadTracks(title, keyword = '') {
   state.tracksPage = 0;
   state.tracksLoading = false;
   state.tracksError = '';
-  $('folder-title').textContent = title || '收藏夹';
+  swapText($('folder-title'), title || '收藏夹');
   $('folder-meta').textContent = '正在加载…';
   try {
     const data = await fetchTracksPage(fid, 1, keyword);
@@ -850,7 +959,7 @@ async function loadTracks(title, keyword = '') {
     state.index = state.current
       ? state.tracks.findIndex((t) => t.bvid === state.current.bvid)
       : -1;
-    $('folder-title').textContent = data.title || title || '收藏夹';
+    swapText($('folder-title'), data.title || title || '收藏夹');
     updateFolderMeta();
     renderTracks();
     $('tracks').scrollTop = 0;
@@ -932,12 +1041,21 @@ async function loadMoreTracks() {
   }
 }
 
-function createTrackRow(track, i) {
+function createTrackRow(track, i, enterIndex = -1) {
   const row = document.createElement('div');
   row.className = 'track';
   row.dataset.index = String(i);
   row.dataset.bvid = track.bvid;
   if (state.current && state.current.bvid === track.bvid) row.classList.add('active');
+  if (enterIndex >= 0 && motionAllowed()) {
+    row.classList.add('is-entering');
+    row.style.setProperty('--enter-i', String(Math.min(enterIndex, 12)));
+    row.addEventListener('animationend', (evt) => {
+      if (evt.target === row && evt.animationName === 'track-enter') {
+        row.classList.remove('is-entering');
+      }
+    });
+  }
 
   const idx = document.createElement('div');
   idx.className = 'idx';
@@ -980,7 +1098,7 @@ function renderTracks() {
     return;
   }
   const frag = document.createDocumentFragment();
-  state.tracks.forEach((track, i) => frag.appendChild(createTrackRow(track, i)));
+  state.tracks.forEach((track, i) => frag.appendChild(createTrackRow(track, i, i)));
   box.appendChild(frag);
   renderTracksFooter();
 }
@@ -994,7 +1112,7 @@ function appendTracks(items) {
   const frag = document.createDocumentFragment();
   items.forEach((track, k) => {
     state.tracks.push(track);
-    frag.appendChild(createTrackRow(track, start + k));
+    frag.appendChild(createTrackRow(track, start + k, k));
   });
   if (footer && footer.parentNode === box) box.insertBefore(frag, footer);
   else box.appendChild(frag);
@@ -1076,17 +1194,22 @@ async function playTrackNow(track) {
   state.detailSpeed = new Array(NP_SPEED_POINTS).fill(0);
   npSyncEntry();
 
-  $('now-title').textContent = track.title;
-  $('now-sub').textContent = track.upper || '';
+  swapText($('now-title'), track.title);
+  swapText($('now-sub'), track.upper || '');
   $('quality').textContent = '解析中…';
   // 与详情页共用 560px 封面：同一个 Promise，两处同帧出现
   applyCoverElement($('now-cover'), track.cover, COVER_CURRENT_SIZE);
+  if (motionAllowed()) restartClass($('now-cover'), 'is-turning', 560);
   // 详情页关着时先把大封面准备好，打开时飞行动画才有落点
   if (!npOpen()) npApplyCover(track.cover || '');
   $('stats').textContent = '正在探测 CDN 节点…';
+  let activated = null;
   document.querySelectorAll('.track').forEach((el) => {
-    el.classList.toggle('active', el.dataset.bvid === track.bvid);
+    const active = el.dataset.bvid === track.bvid;
+    el.classList.toggle('active', active);
+    if (active) activated = el;
   });
+  if (activated && motionAllowed()) restartClass(activated, 'just-activated', 700);
   if (npOpen()) {
     npRenderInfo();
     npRenderQueue();
@@ -1145,6 +1268,14 @@ function syncPlayButton() {
   btn.classList.toggle('is-playing', playing);
   btn.setAttribute('aria-label', playing ? '暂停' : '播放');
   btn.title = playing ? '暂停（Space）' : '播放（Space）';
+}
+
+/** 播放 / 暂停时给两个播放键一枚向外散开的涟漪。 */
+function pulsePlayControls() {
+  if (!motionAllowed()) return;
+  [$('play'), $('np-play')].forEach((btn) => {
+    if (btn) restartClass(btn, 'is-pulsing', 680);
+  });
 }
 
 function playNext(step = 1) {
@@ -1358,41 +1489,120 @@ function npQueueView() {
 
 let npCoverToken = 0;
 let npCoverUrl = '';
+let npCoverLoading = null;
+let npPendingTrackSwap = false;
+let npPendingQueuePulse = false;
+let npLastBvid = '';
+let npUnderTimer = null;
 
 /** 详情页封面与底部播放器共用 resolveCover(560)：同一请求、同一时刻换图。 */
 function npApplyCover(cover) {
   const art = $('np-art-cover');
+  const under = $('np-art-cover-under');
   const ambient = $('np-ambient');
-  if (cover === npCoverUrl && !art.classList.contains('is-empty')) return;
+  const swap = npPendingTrackSwap;
+  npPendingTrackSwap = false;
+  const next = cover || '';
+  // 同一张封面：已经上屏就什么都不用做；还在加载 / 正在做交叉溶解就让旧图继续垫着，
+  // 不要因为一次重复渲染把底下的旧封面擦掉。
+  if (next === npCoverUrl) {
+    if (art.style.backgroundImage) return;
+    if (npCoverLoading === next) return;
+  }
 
   const token = ++npCoverToken;
-  npCoverUrl = cover || '';
+  npCoverUrl = next;
+  npCoverLoading = next;
 
-  // 新封面加载前先收起上一首的封面，避免切歌瞬间显示错图
-  art.classList.add('is-empty');
+  // 旧封面先垫到下一层：新图加载期间不会出现一块空白，
+  // 等新图就绪后主层淡入，叠在旧封面上完成交叉溶解。
+  // 主层还没图（例如快速来回切歌）时沿用下层已有的封面，避免闪一下底色。
+  const previous = art.style.backgroundImage || (under ? under.style.backgroundImage : '');
+  if (under) {
+    under.style.backgroundImage = previous || '';
+  }
   art.style.backgroundImage = '';
-  ambient.classList.add('is-empty');
-  ambient.style.backgroundImage = '';
+  art.classList.toggle('is-empty', !previous);
+  if (!previous) {
+    ambient.classList.add('is-empty');
+    ambient.style.backgroundImage = '';
+  }
 
-  if (!cover) return;
+  if (!cover) {
+    npCoverLoading = null;
+    art.classList.add('is-empty');
+    ambient.classList.add('is-empty');
+    ambient.style.backgroundImage = '';
+    if (under) under.style.backgroundImage = '';
+    return;
+  }
   resolveCover(cover, COVER_CURRENT_SIZE).then((src) => {
-    if (token !== npCoverToken || !src) return;
+    if (token !== npCoverToken) return;
+    npCoverLoading = null;
+    if (!src) {
+      art.classList.add('is-empty');
+      art.style.backgroundImage = '';
+      ambient.classList.add('is-empty');
+      ambient.style.backgroundImage = '';
+      if (under) under.style.backgroundImage = '';
+      return;
+    }
     art.classList.remove('is-empty');
     art.style.backgroundImage = `url(${src})`;
     ambient.classList.remove('is-empty');
     ambient.style.backgroundImage = `url(${src})`;
+    if (swap && !npEntering) npAnimateTrackSwap({ cover: true, text: false });
+    clearTimeout(npUnderTimer);
+    npUnderTimer = setTimeout(() => {
+      npUnderTimer = null;
+      if (under) under.style.backgroundImage = '';
+    }, 900);
   });
+}
+
+/** 切歌：文案逐行浮入；封面就绪后再从柔焦里显影，环境光换一口气。 */
+function npAnimateTrackSwap({ cover = false, text = true } = {}) {
+  if (!npOpen() || !motionAllowed()) return;
+  const overlay = $('now-playing');
+  if (text) {
+    const line = overlay.querySelector('.np-trackline');
+    if (line) {
+      Array.from(line.children).forEach((el, i) => {
+        el.style.setProperty('--line-i', String(i));
+      });
+      restartClass(line, 'is-swapping', 780);
+    }
+  }
+  if (cover) {
+    const art = $('np-art-cover');
+    if (art && !art.classList.contains('is-empty')) restartClass(art, 'is-swapping', 700);
+    const ambient = $('np-ambient');
+    if (ambient && !ambient.classList.contains('is-empty')) {
+      restartClass(ambient, 'is-swapping', 1000);
+    }
+  }
 }
 
 function npRenderInfo() {
   if (!npOpen()) return;
   const track = npTrack();
   if (!track) {
+    npLastBvid = '';
+    npPendingTrackSwap = false;
+    npPendingQueuePulse = false;
     $('np-title').textContent = '未在播放';
     $('np-artist').textContent = '—';
     $('np-intro').textContent = '';
     $('np-chips').replaceChildren();
     return;
+  }
+
+  const nextBvid = track.bvid || '';
+  const trackChanged = Boolean(npLastBvid && nextBvid && nextBvid !== npLastBvid);
+  npLastBvid = nextBvid;
+  if (trackChanged) {
+    npPendingTrackSwap = true;
+    npPendingQueuePulse = true;
   }
 
   const resolved = state.current && state.current.bvid === track.bvid ? state.current : null;
@@ -1402,6 +1612,7 @@ function npRenderInfo() {
   $('np-intro').classList.toggle('hidden', !track.intro);
   $('np-header-sub').textContent = npFolderTitle() || 'B 站收藏夹';
   $('np-source').textContent = state.nowSource || npSourceLabel(state.queueSource);
+  if (trackChanged && !npEntering) npAnimateTrackSwap({ cover: false });
 
   const cover = track.cover || '';
   npApplyCover(cover);
@@ -1496,6 +1707,7 @@ function npRenderQueue() {
   const box = $('np-queue');
   box.replaceChildren();
   if (!items.length) {
+    npPendingQueuePulse = false;
     box.append(npEl('div', 'np-queue-empty', '队列还是空的，从左侧选一首开始播放吧。'));
     return;
   }
@@ -1526,6 +1738,14 @@ function npRenderQueue() {
     box.append(npEl('div', 'np-queue-foot', `队列结束 · 共 ${items.length} 首`));
   }
   npScrollCurrent();
+  if (npPendingQueuePulse) {
+    const pulse = !npEntering && motionAllowed();
+    npPendingQueuePulse = false;
+    if (pulse) {
+      const current = box.querySelector('.np-q-row.is-current');
+      if (current) restartClass(current, 'is-just-current', 640);
+    }
+  }
 }
 
 function npQueueRow(track, index, current) {
@@ -1778,12 +1998,14 @@ function npSetQueue(open, { focus = false } = {}) {
   $('now-playing').classList.toggle('np-queue-open', Boolean(open));
   const toggles = document.querySelectorAll('[data-queue-toggle]');
   toggles.forEach((btn) => btn.setAttribute('aria-expanded', String(Boolean(open))));
+  npArtRect = null;
   if (!open) {
     if (focus && toggles.length) toggles[0].focus({ preventScroll: true });
     return;
   }
   npRenderQueue();
   requestAnimationFrame(() => npScrollCurrent());
+  if (!npEntering) npAnimateQueueIn();
   if (focus) $('np-queue-close').focus({ preventScroll: true });
 }
 
@@ -1834,10 +2056,21 @@ let npClosing = false;
 let npCloseTimer = null;
 let npCoverTimer = null;
 let npAfterClose = null;
+let npEnterTimer = null;
+let npEntering = false;
+let npQueueInTimer = null;
+let npPointerRaf = 0;
+let npPointerDirty = false;
+let npTiltX = 0;
+let npTiltY = 0;
+let npGlareX = 50;
+let npGlareY = 50;
+let npAmbientX = 0;
+let npAmbientY = 0;
+let npArtRect = null;
 
 function npMotionAvailable() {
-  return typeof Element.prototype.animate === 'function'
-    && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return motionAllowed();
 }
 
 /** 停掉上一轮过渡，清掉飞行封面；返回本轮令牌，过期的异步回调靠它作废。 */
@@ -1847,6 +2080,21 @@ function npStopMotion() {
   npCloseTimer = null;
   clearTimeout(npCoverTimer);
   npCoverTimer = null;
+  clearTimeout(npEnterTimer);
+  npEnterTimer = null;
+  clearTimeout(npQueueInTimer);
+  npQueueInTimer = null;
+  clearTimeout(npUnderTimer);
+  npUnderTimer = null;
+  const under = $('np-art-cover-under');
+  if (under) under.style.backgroundImage = '';
+  npCoverLoading = null;
+  npEntering = false;
+  npPendingQueuePulse = false;
+  npResetPointer();
+  $('np-queue').querySelectorAll('.is-entering-row').forEach((row) => {
+    row.classList.remove('is-entering-row');
+  });
   npMotionAnims.forEach((anim) => {
     try { anim.cancel(); } catch (_) { /* 已经播完 */ }
   });
@@ -1854,12 +2102,144 @@ function npStopMotion() {
   document.querySelectorAll('.np-cover-fly').forEach((node) => node.remove());
   $('now-playing').classList.remove('is-closing');
   $('np-art').style.opacity = '';
+  const nowCover = $('now-cover');
+  if (nowCover) nowCover.classList.remove('is-turning');
   return npMotionToken;
 }
 
 function npTrackMotion(anim) {
   npMotionAnims.push(anim);
   return anim;
+}
+
+/* 指针视差：环境光跟着鼠标缓慢偏移；悬停封面时做 3D 倾斜 + 高光。
+   只在鼠标（不是触摸）、桌面壳允许动效、详情页稳定展示时启用。 */
+function npResetPointer() {
+  npTiltX = 0;
+  npTiltY = 0;
+  npGlareX = 50;
+  npGlareY = 50;
+  npAmbientX = 0;
+  npAmbientY = 0;
+  npArtRect = null;
+  npPointerDirty = false;
+  if (npPointerRaf) {
+    cancelAnimationFrame(npPointerRaf);
+    npPointerRaf = 0;
+  }
+  const overlay = $('now-playing');
+  if (!overlay) return;
+  overlay.classList.remove('np-tilt-live', 'np-ambient-live');
+  overlay.style.setProperty('--np-tilt-x', '0deg');
+  overlay.style.setProperty('--np-tilt-y', '0deg');
+  overlay.style.setProperty('--np-glare-x', '50%');
+  overlay.style.setProperty('--np-glare-y', '50%');
+  overlay.style.setProperty('--np-ambient-x', '0px');
+  overlay.style.setProperty('--np-ambient-y', '0px');
+}
+
+function npFlushPointer() {
+  npPointerRaf = 0;
+  if (!npPointerDirty) return;
+  npPointerDirty = false;
+  const overlay = $('now-playing');
+  if (!overlay) return;
+  overlay.style.setProperty('--np-tilt-x', `${npTiltX.toFixed(2)}deg`);
+  overlay.style.setProperty('--np-tilt-y', `${npTiltY.toFixed(2)}deg`);
+  overlay.style.setProperty('--np-glare-x', `${npGlareX.toFixed(1)}%`);
+  overlay.style.setProperty('--np-glare-y', `${npGlareY.toFixed(1)}%`);
+  overlay.style.setProperty('--np-ambient-x', `${npAmbientX.toFixed(2)}px`);
+  overlay.style.setProperty('--np-ambient-y', `${npAmbientY.toFixed(2)}px`);
+}
+
+function npQueuePointerFrame() {
+  npPointerDirty = true;
+  if (!npPointerRaf) npPointerRaf = requestAnimationFrame(npFlushPointer);
+}
+
+function setupNpPointer() {
+  const overlay = $('now-playing');
+  const art = $('np-art');
+  if (!overlay || !art) return;
+
+  const pointerReady = (evt) => (
+    evt.pointerType === 'mouse'
+    && npOpen()
+    && !npClosing
+    && !npEntering
+    && motionAllowed()
+  );
+
+  overlay.addEventListener('pointermove', (evt) => {
+    if (!pointerReady(evt)) return;
+    const nx = evt.clientX / Math.max(1, window.innerWidth) - 0.5;
+    const ny = evt.clientY / Math.max(1, window.innerHeight) - 0.5;
+    npAmbientX = -nx * 18;
+    npAmbientY = -ny * 12;
+    overlay.classList.add('np-ambient-live');
+    npQueuePointerFrame();
+  }, { passive: true });
+
+  overlay.addEventListener('pointerleave', () => {
+    npAmbientX = 0;
+    npAmbientY = 0;
+    overlay.classList.remove('np-ambient-live');
+    npQueuePointerFrame();
+  });
+
+  const measureArt = () => {
+    npArtRect = art.getBoundingClientRect();
+  };
+  art.addEventListener('pointerenter', measureArt, { passive: true });
+  window.addEventListener('resize', () => { npArtRect = null; }, { passive: true });
+
+  art.addEventListener('pointermove', (evt) => {
+    if (!pointerReady(evt)) return;
+    const rect = npArtRect || art.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const dx = Math.max(-1, Math.min(1, ((evt.clientX - rect.left) / rect.width) * 2 - 1));
+    const dy = Math.max(-1, Math.min(1, ((evt.clientY - rect.top) / rect.height) * 2 - 1));
+    npTiltX = -dy * 4.4;
+    npTiltY = dx * 6.2;
+    npGlareX = 50 + dx * 42;
+    npGlareY = 50 + dy * 42;
+    overlay.classList.add('np-tilt-live');
+    npQueuePointerFrame();
+  }, { passive: true });
+
+  art.addEventListener('pointerleave', () => {
+    npTiltX = 0;
+    npTiltY = 0;
+    npGlareX = 50;
+    npGlareY = 50;
+    overlay.classList.remove('np-tilt-live');
+    npQueuePointerFrame();
+  });
+
+  const release = () => {
+    if (!motionAllowed()) npResetPointer();
+  };
+  if (typeof motionQuery.addEventListener === 'function') {
+    motionQuery.addEventListener('change', release);
+  }
+}
+
+/** 队列首次铺开时的错峰入场；只给前 14 行，长队列不会一次动几百行。 */
+function npAnimateQueueIn() {
+  if (!motionAllowed() || !npOpen()) return;
+  const box = $('np-queue');
+  if (!box) return;
+  const rows = Array.from(box.querySelectorAll('.np-q-row')).slice(0, 14);
+  if (!rows.length) return;
+  clearTimeout(npQueueInTimer);
+  rows.forEach((row, i) => {
+    row.style.setProperty('--q-i', String(i));
+    row.classList.add('is-entering-row');
+  });
+  npQueueInTimer = setTimeout(() => {
+    npQueueInTimer = null;
+    rows.forEach((row) => row.classList.remove('is-entering-row'));
+  }, 820);
 }
 
 /** 关闭前抓一份当前动效状态：入场没播完就按 Esc 时，从眼前这一帧接着退场。 */
@@ -1964,6 +2344,13 @@ function npEnterMotion(token) {
   const deck = overlay.querySelector('.np-console');
   const queue = overlay.querySelector('.np-queue-rail');
   const art = $('np-art');
+
+  npEntering = true;
+  clearTimeout(npEnterTimer);
+  npEnterTimer = setTimeout(() => {
+    npEntering = false;
+    npEnterTimer = null;
+  }, NP_ENTER_MS + 140);
 
   npTrackMotion(overlay.animate(
     [{ opacity: 0 }, { opacity: 1 }],
@@ -2086,15 +2473,32 @@ function npFinishClose(token) {
   if (token !== npMotionToken) return;
   const overlay = $('now-playing');
   npClosing = false;
+  npEntering = false;
+  clearTimeout(npCloseTimer);
   npCloseTimer = null;
   clearTimeout(npCoverTimer);
   npCoverTimer = null;
+  clearTimeout(npEnterTimer);
+  npEnterTimer = null;
+  clearTimeout(npQueueInTimer);
+  npQueueInTimer = null;
+  clearTimeout(npUnderTimer);
+  npUnderTimer = null;
+  const under = $('np-art-cover-under');
+  if (under) under.style.backgroundImage = '';
+  npCoverLoading = null;
+  npPendingTrackSwap = false;
+  npPendingQueuePulse = false;
+  npResetPointer();
   overlay.classList.add('hidden');
   overlay.classList.remove('np-queue-open', 'is-closing', 'np-motion');
   $('app').removeAttribute('inert');
   $('player').removeAttribute('inert');
   $('np-art').style.opacity = '';
   document.querySelectorAll('.np-cover-fly').forEach((node) => node.remove());
+  $('np-queue').querySelectorAll('.is-entering-row').forEach((row) => {
+    row.classList.remove('is-entering-row');
+  });
   npMotionAnims.forEach((anim) => {
     try { anim.cancel(); } catch (_) { /* 已经播完 */ }
   });
@@ -2116,6 +2520,7 @@ function openNowPlaying() {
   npAfterClose = null;
   const token = npStopMotion();
   const animate = npMotionAvailable();
+  npEntering = true;
   // 先挂上 np-motion，确保 display 变化时兜底的 np-in 不会和 JS 动效叠加
   if (animate) $('now-playing').classList.add('np-motion');
   $('now-playing').classList.remove('hidden');
@@ -2124,7 +2529,9 @@ function openNowPlaying() {
   npSetEngine(false);
   npSetQueue(!npQueueIsOverlay());
   npRenderAll();
+  npAnimateQueueIn();
   if (animate) npEnterMotion(token);
+  else npEntering = false;
   setTimeout(() => {
     if (npOpen()) $('np-play').focus({ preventScroll: true });
   }, 30);
@@ -2205,6 +2612,11 @@ function setupSeekBar(seek, apply, tip = null) {
     tip.style.left = `${ratio * 100}%`;
   };
 
+  // 悬停预览线：和滑块、气泡共用同一个比例，鼠标离开由 CSS :hover 收起
+  const showHover = (ratio) => {
+    seek.style.setProperty('--seek-hover', `${ratio * 100}%`);
+  };
+
   seek.addEventListener('pointerdown', (evt) => {
     dragging = true;
     seek.classList.add('is-dragging');
@@ -2212,10 +2624,12 @@ function setupSeekBar(seek, apply, tip = null) {
     const ratio = ratioFromEvent(evt);
     apply(ratio);
     showTip(ratio);
+    showHover(ratio);
   });
   seek.addEventListener('pointermove', (evt) => {
     const ratio = ratioFromEvent(evt);
     showTip(ratio);
+    showHover(ratio);
     if (dragging) apply(ratio);
   });
   seek.addEventListener('pointerup', (evt) => {
@@ -2738,7 +3152,7 @@ function syncSettingsUi() {
   if ($('btr-options')) $('btr-options').classList.toggle('is-disabled', !enabled);
   if ($('btr-chunk-options')) $('btr-chunk-options').classList.toggle('is-disabled', !enabled);
 
-  const version = state.version || '0.2.3';
+  const version = state.version || '0.2.4';
   ['settings-version', 'settings-version-inline'].forEach((id) => {
     const el = $(id);
     if (el) el.textContent = version;
@@ -2752,13 +3166,50 @@ function syncSettingsUi() {
   renderFolderSettings();
 }
 
+let settingsMotionToken = 0;
+let settingsMotionAnims = [];
+let settingsClosing = false;
+let settingsCloseTimer = null;
+const SETTINGS_ORDER = Object.keys(SETTINGS_TABS);
+
+/** 停掉设置窗口上正在播的动效；返回本轮的令牌，过期的回调靠它作废。 */
+function stopSettingsMotion() {
+  settingsMotionToken += 1;
+  clearTimeout(settingsCloseTimer);
+  settingsCloseTimer = null;
+  settingsMotionAnims.forEach((anim) => {
+    try { anim.cancel(); } catch (_) { /* 已经播完 */ }
+  });
+  settingsMotionAnims = [];
+  settingsClosing = false;
+  const modal = $('settings-modal');
+  if (modal) modal.classList.remove('is-animating', 'is-closing');
+  return settingsMotionToken;
+}
+
+function trackSettingsMotion(anims) {
+  anims.forEach((anim) => settingsMotionAnims.push(anim));
+  return anims;
+}
+
 function setSettingsTab(tab) {
   const next = SETTINGS_TABS[tab] ? tab : 'playback';
+  const currentPane = document.querySelector('.settings-pane.active');
+  const currentTab = currentPane ? currentPane.dataset.settingsPane : '';
+  const dir = currentTab && SETTINGS_ORDER.indexOf(next) < SETTINGS_ORDER.indexOf(currentTab)
+    ? 'back'
+    : 'forward';
   document.querySelectorAll('[data-settings-tab]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.settingsTab === next);
   });
   document.querySelectorAll('[data-settings-pane]').forEach((pane) => {
-    pane.classList.toggle('active', pane.dataset.settingsPane === next);
+    const active = pane.dataset.settingsPane === next;
+    pane.classList.toggle('active', active);
+    if (!active) return;
+    pane.dataset.dir = dir;
+    Array.from(pane.children).forEach((el, i) => {
+      el.style.setProperty('--group-i', String(Math.min(i, 6)));
+    });
   });
   $('settings-title').textContent = SETTINGS_TABS[next].title;
   $('settings-subtitle').textContent = SETTINGS_TABS[next].subtitle;
@@ -2766,27 +3217,134 @@ function setSettingsTab(tab) {
   if (scroll) scroll.scrollTop = 0;
 }
 
+/** 打开：遮罩淡入，窗口从下方带一点 spring 浮起，分类与标题错峰。 */
+function playSettingsOpen(token) {
+  const modal = $('settings-modal');
+  if (!modal || !motionAllowed()) return;
+  const win = modal.querySelector('.settings-window');
+  if (!win) return;
+  modal.classList.add('is-animating');
+  const header = modal.querySelector('.settings-header');
+  const nav = Array.from(modal.querySelectorAll('.settings-nav-item'));
+  const anims = [
+    modal.animate(
+      [{ opacity: 0 }, { opacity: 1 }],
+      { duration: 200, easing: 'ease-out', fill: 'both' },
+    ),
+    win.animate(
+      [
+        { opacity: 0, transform: 'translate3d(0, 12px, 0) scale(0.982)' },
+        { opacity: 1, transform: 'none' },
+      ],
+      { duration: 380, easing: MOTION_EASE_SPRING, fill: 'both' },
+    ),
+  ];
+  if (header) {
+    anims.push(header.animate(
+      [
+        { opacity: 0, transform: 'translate3d(0, 6px, 0)' },
+        { opacity: 1, transform: 'none' },
+      ],
+      { duration: 320, delay: 80, easing: MOTION_EASE_OUT, fill: 'both' },
+    ));
+  }
+  nav.forEach((el, i) => {
+    anims.push(el.animate(
+      [
+        { opacity: 0, transform: 'translate3d(-8px, 0, 0)' },
+        { opacity: 1, transform: 'none' },
+      ],
+      { duration: 300, delay: 70 + i * 24, easing: MOTION_EASE_OUT, fill: 'both' },
+    ));
+  });
+  trackSettingsMotion(anims);
+  Promise.all(anims.map((anim) => anim.finished.catch(() => {}))).then(() => {
+    if (token !== settingsMotionToken) return;
+    anims.forEach((anim) => {
+      try { anim.cancel(); } catch (_) { /* 已经结束 */ }
+    });
+    settingsMotionAnims = settingsMotionAnims.filter((anim) => !anims.includes(anim));
+    modal.classList.remove('is-animating');
+  });
+}
+
 function openSettings(tab = 'playback') {
+  const modal = $('settings-modal');
+  if (!modal) return;
+  const token = stopSettingsMotion();
   settingsReturnFocus = document.activeElement;
   syncSettingsUi();
   setSettingsTab(tab);
-  $('settings-modal').classList.remove('hidden');
+  modal.classList.remove('hidden');
   document.body.classList.add('settings-open');
   // 设置层永远在最上面：把播放详情也设为 inert，避免焦点跑到背后的页面
   if (npOpen()) $('now-playing').setAttribute('inert', '');
+  playSettingsOpen(token);
   setTimeout(() => $('close-settings').focus(), 30);
 }
 
-function closeSettings() {
+/** 关闭：窗口先轻微下沉并淡出，再真正 hidden；令牌防止连点交错。 */
+function closeSettings({ immediate = false } = {}) {
+  if (settingsClosing) return;
   flushPreferenceSave();
   flushFolderSave();
-  $('settings-modal').classList.add('hidden');
+  const modal = $('settings-modal');
+  if (!modal || modal.classList.contains('hidden')) {
+    document.body.classList.remove('settings-open');
+    $('now-playing').removeAttribute('inert');
+    return;
+  }
+  const token = stopSettingsMotion();
+  if (immediate || !motionAllowed()) {
+    settingsFinishClose(token);
+    return;
+  }
+  settingsClosing = true;
+  modal.classList.add('is-closing');
+  const win = modal.querySelector('.settings-window');
+  const anims = [
+    modal.animate(
+      [{ opacity: 1 }, { opacity: 0 }],
+      { duration: 200, easing: 'ease-in', fill: 'both' },
+    ),
+  ];
+  if (win) {
+    anims.push(win.animate(
+      [
+        { opacity: 1, transform: 'none' },
+        { opacity: 0, transform: 'translate3d(0, 6px, 0) scale(0.988)' },
+      ],
+      { duration: 180, easing: MOTION_EASE_IN, fill: 'both' },
+    ));
+  }
+  trackSettingsMotion(anims);
+  Promise.all(anims.map((anim) => anim.finished.catch(() => {})))
+    .then(() => settingsFinishClose(token));
+  // 窗口被切到后台时动画可能停住：兜底按时收尾
+  settingsCloseTimer = setTimeout(() => settingsFinishClose(token), 420);
+}
+
+function settingsFinishClose(token) {
+  if (token !== settingsMotionToken) return;
+  settingsClosing = false;
+  clearTimeout(settingsCloseTimer);
+  settingsCloseTimer = null;
+  settingsMotionAnims.forEach((anim) => {
+    try { anim.cancel(); } catch (_) { /* 已经播完 */ }
+  });
+  settingsMotionAnims = [];
+  const modal = $('settings-modal');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('is-closing', 'is-animating');
+  }
   document.body.classList.remove('settings-open');
   $('now-playing').removeAttribute('inert');
-  if (settingsReturnFocus && typeof settingsReturnFocus.focus === 'function') {
-    settingsReturnFocus.focus();
-  }
+  const target = settingsReturnFocus;
   settingsReturnFocus = null;
+  if (target && typeof target.focus === 'function' && document.contains(target)) {
+    target.focus({ preventScroll: true });
+  }
 }
 
 function showSettingsToast(message, isError = false) {
@@ -2853,7 +3411,7 @@ async function handleLogoutClick() {
     $('folders').innerHTML = '';
     $('folder-count').textContent = '';
     $('search').value = '';
-    $('folder-title').textContent = '选择一个收藏夹';
+    swapText($('folder-title'), '选择一个收藏夹');
     $('folder-meta').textContent = state.desktop
       ? '还没有登录，点「登录」扫码，或使用账号密码 / 短信验证码'
       : '还没有登录，点「登录」扫码';
@@ -3017,10 +3575,7 @@ $('np-engine-close').addEventListener('click', () => npSetEngine(false, { focus:
 $('np-engine-backdrop').addEventListener('click', () => npSetEngine(false, { focus: true }));
 document.querySelectorAll('[data-theme-choice]').forEach((btn) => {
   btn.addEventListener('click', () => {
-    const theme = btn.dataset.themeChoice;
-    if (theme === currentTheme()) return;
-    applyTheme(theme);
-    persistTheme(theme);
+    chooseTheme(btn.dataset.themeChoice, btn);
   });
 });
 
@@ -3059,7 +3614,7 @@ document.querySelectorAll('[data-settings-tab]').forEach((btn) => {
   btn.addEventListener('click', () => setSettingsTab(btn.dataset.settingsTab));
 });
 $('settings-account-login').addEventListener('click', () => {
-  closeSettings();
+  closeSettings({ immediate: true });
   openLogin();
 });
 $('settings-account-logout').addEventListener('click', handleLogoutClick);
@@ -3117,12 +3672,14 @@ $('audio').addEventListener('progress', () => {
 
 $('audio').addEventListener('play', () => {
   syncPlayButton();
+  pulsePlayControls();
   startStats();
   if (npOpen()) npRenderPlayState();
   npSyncEntry();
 });
 $('audio').addEventListener('pause', () => {
   syncPlayButton();
+  pulsePlayControls();
   stopStats();
   if (npOpen()) {
     npRenderPlayState();
@@ -3232,4 +3789,5 @@ window.addEventListener('beforeunload', () => {
 initTheme();
 syncPlayButton();
 setupWindowChrome();
+setupNpPointer();
 boot();

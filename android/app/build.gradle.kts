@@ -6,8 +6,8 @@ plugins {
 }
 
 // 版本号默认给本地调试构建用；发布构建由 CI 按 git tag 通过 -P 覆盖，例如：
-// ./gradlew :app:assembleRelease -PbilimuseVersionName=0.2.3 -PbilimuseVersionCode=203
-val appVersionName = providers.gradleProperty("bilimuseVersionName").getOrElse("0.2.3")
+// ./gradlew :app:assembleRelease -PbilimuseVersionName=0.2.4 -PbilimuseVersionCode=204
+val appVersionName = providers.gradleProperty("bilimuseVersionName").getOrElse("0.2.4")
 val appVersionCodeRaw = providers.gradleProperty("bilimuseVersionCode").getOrElse("1")
 val appVersionCode = appVersionCodeRaw.toIntOrNull()
     ?: error("bilimuseVersionCode 必须是整数（当前：$appVersionCodeRaw）")

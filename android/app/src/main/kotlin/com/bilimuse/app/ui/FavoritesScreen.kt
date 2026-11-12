@@ -27,7 +27,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -100,6 +99,7 @@ fun FavoritesScreen(
                                 allHidden = hiddenCount == folders.size,
                                 onShowAllFolders = onShowAllFolders,
                                 onHideAllFolders = onHideAllFolders,
+                                modifier = Modifier.staggerIn(index = 1, distance = 10.dp),
                             )
                         }
                         item {
@@ -107,6 +107,7 @@ fun FavoritesScreen(
                                 folders = folders,
                                 hiddenFolderIds = hiddenFolderIds,
                                 onFolderHidden = onFolderHidden,
+                                modifier = Modifier.staggerIn(index = 2, distance = 10.dp),
                             )
                         }
                         item {
@@ -115,6 +116,7 @@ fun FavoritesScreen(
                                     "都不再显示它，B 站账号里的收藏不会变化。新收藏夹默认显示。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = BiliMuted.copy(alpha = 0.85f),
+                                modifier = Modifier.staggerIn(index = 3, distance = 8.dp),
                             )
                         }
                     }
@@ -136,13 +138,18 @@ private fun FavoritesTopBar(
     Row(
         Modifier
             .fillMaxWidth()
+            .staggerIn(index = 0, distance = 6.dp)
             .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack) {
+        MotionIconButton(
+            onClick = onBack,
+            contentDescription = "返回",
+            tint = BiliText,
+        ) {
             Icon(
                 Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "返回",
+                contentDescription = null,
                 tint = BiliText,
             )
         }
@@ -160,10 +167,15 @@ private fun FavoritesTopBar(
             )
         }
         if (state.user.loggedIn || state.demo) {
-            IconButton(onClick = onRefresh, enabled = !state.loading) {
+            MotionIconButton(
+                onClick = onRefresh,
+                contentDescription = "刷新收藏夹",
+                enabled = !state.loading,
+                tint = if (state.loading) BiliMuted.copy(alpha = 0.45f) else BiliText,
+            ) {
                 Icon(
                     Icons.Filled.Refresh,
-                    contentDescription = "刷新收藏夹",
+                    contentDescription = null,
                     tint = if (state.loading) BiliMuted.copy(alpha = 0.45f) else BiliText,
                 )
             }
@@ -178,12 +190,13 @@ private fun FavoritesSummary(
     allHidden: Boolean,
     onShowAllFolders: () -> Unit,
     onHideAllFolders: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
         color = BiliPanel2,
         shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, BiliLine),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
             Text("共 $total 个收藏夹", style = MaterialTheme.typography.titleSmall)
@@ -272,26 +285,35 @@ private fun FolderListCard(
     folders: List<Folder>,
     hiddenFolderIds: Set<Long>,
     onFolderHidden: (Long, Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
         color = BiliPanel,
         shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, BiliLine),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
             folders.forEachIndexed { index, folder ->
-                if (index > 0) HorizontalDivider(color = BiliLine.copy(alpha = 0.7f))
-                val hidden = folder.id in hiddenFolderIds
-                SettingSwitch(
-                    title = folder.title.ifBlank { "未命名收藏夹" },
-                    description = buildString {
-                        append("${folder.count} 个视频")
-                        if (hidden) append(" · 已隐藏")
-                    },
-                    checked = !hidden,
-                    onCheckedChange = { checked -> onFolderHidden(folder.id, !checked) },
-                )
+                Column(
+                    Modifier.staggerIn(
+                        index = index.coerceAtMost(8),
+                        distance = 6.dp,
+                        key = folder.id,
+                    ),
+                ) {
+                    if (index > 0) HorizontalDivider(color = BiliLine.copy(alpha = 0.7f))
+                    val hidden = folder.id in hiddenFolderIds
+                    SettingSwitch(
+                        title = folder.title.ifBlank { "未命名收藏夹" },
+                        description = buildString {
+                            append("${folder.count} 个视频")
+                            if (hidden) append(" · 已隐藏")
+                        },
+                        checked = !hidden,
+                        onCheckedChange = { checked -> onFolderHidden(folder.id, !checked) },
+                    )
+                }
             }
         }
     }
@@ -302,6 +324,7 @@ private fun LoadingState() {
     Column(
         Modifier
             .fillMaxWidth()
+            .staggerIn(index = 0, distance = 8.dp)
             .padding(vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -326,6 +349,7 @@ private fun LoginPrompt(onLogin: () -> Unit) {
         Column(
             Modifier
                 .fillMaxWidth()
+                .staggerIn(index = 0, distance = 8.dp)
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -359,6 +383,7 @@ private fun EmptyState(demo: Boolean, onRefresh: () -> Unit) {
         Column(
             Modifier
                 .fillMaxWidth()
+                .staggerIn(index = 0, distance = 8.dp)
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {

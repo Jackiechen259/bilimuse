@@ -7,6 +7,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.bilimuse.app.btr.EngineSnapshot
@@ -50,6 +51,9 @@ data class PlayerUiState(
 /**
  * MediaController 里的实际播放队列。
  * 只在时间线或随机模式变化时重建，避免每 500ms 的进度 tick 复制上千首的数据。
+ *
+ * 随机播放时 [items] 按 ExoPlayer 当前的随机顺序排列（不再是入队顺序），
+ * [currentIndex] 也是这份顺序里的位置；面板点行时由 [PlayerController] 换算回时间线下标。
  */
 data class PlayerQueueState(
     val items: List<TrackItem> = emptyList(),
@@ -82,6 +86,15 @@ class PlayerController(
      * 只在本进程内维护；MediaController 重连时从播放器实际队列重建。
      */
     private val queueIds = LinkedHashSet<String>()
+
+    /**
+     * 面板行下标 → 播放器时间线下标。顺序播放时两者相同；随机播放时面板按
+     * ExoPlayer 的随机顺序排列，点某一行要先换算回时间线位置。
+     */
+    private var timelineIndexByPosition = IntArray(0)
+
+    /** [timelineIndexByPosition] 的反查表，用来在切歌时快速定位当前行。 */
+    private var positionByTimelineIndex = IntArray(0)
 
     private val _state = MutableStateFlow(PlayerUiState())
     val state: StateFlow<PlayerUiState> = _state.asStateFlow()
@@ -195,30 +208,67 @@ class PlayerController(
      *
      * MediaItem 的 metadata 由 [AutoLibrary.trackItem] 从 TrackItem 写入，标题 / UP 主 /
      * 封面 / 时长都够播放队列面板使用；intro 等列表字段不进队列，避免撑大 Binder 事务。
+     *
+     * 随机播放时按 ExoPlayer 当前的随机顺序重排：面板里当前行下面的一首，就是下一首真正
+     * 会播放的曲目，`03 / 128` 也对应随机队列里的位置。随机顺序只在时间线 / 随机模式
+     * 变化时重新展开，进度 tick 不会反复遍历。
      */
     private fun syncQueue(c: MediaController) {
         val count = c.mediaItemCount
-        val index = c.currentMediaItemIndex
+        val timelineIndex = c.currentMediaItemIndex
         val shuffle = c.shuffleModeEnabled
         val current = _queue.value
 
         if (queueDirty || count != current.items.size || shuffle != current.shuffle) {
             queueDirty = false
+            val order = displayOrder(c, count, shuffle)
             val items = ArrayList<TrackItem>(count)
-            for (position in 0 until count) {
-                items += c.getMediaItemAt(position).toTrackItem()
+            for (index in order) {
+                items += c.getMediaItemAt(index).toTrackItem()
             }
+            setQueueOrder(order)
             _queue.value = PlayerQueueState(
                 items = items,
-                currentIndex = index,
+                currentIndex = positionOf(timelineIndex),
                 shuffle = shuffle,
             )
             return
         }
-        if (index != current.currentIndex) {
-            _queue.value = current.copy(currentIndex = index)
+        val position = positionOf(timelineIndex)
+        if (position != current.currentIndex) {
+            _queue.value = current.copy(currentIndex = position)
         }
     }
+
+    /**
+     * 面板每一行对应的播放器时间线下标。
+     *
+     * 顺序播放就是 0..n-1；随机播放交给 [shuffledQueueOrder] 按时间线的 ShuffleOrder
+     * 展开。时间线暂时不可用时退回入队顺序，至少不会丢歌。
+     */
+    private fun displayOrder(c: MediaController, count: Int, shuffle: Boolean): IntArray {
+        if (!shuffle || count <= 1) return IntArray(count) { it }
+        val timeline: Timeline = c.currentTimeline
+        if (timeline.windowCount != count) return IntArray(count) { it }
+        return shuffledQueueOrder(
+            count = count,
+            first = { timeline.getFirstWindowIndex(true) },
+            next = { index -> timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, true) },
+        )
+    }
+
+    private fun setQueueOrder(order: IntArray) {
+        timelineIndexByPosition = order
+        positionByTimelineIndex = IntArray(order.size) { -1 }
+        order.forEachIndexed { position, timelineIndex ->
+            if (timelineIndex in positionByTimelineIndex.indices) {
+                positionByTimelineIndex[timelineIndex] = position
+            }
+        }
+    }
+
+    private fun positionOf(timelineIndex: Int): Int =
+        positionByTimelineIndex.getOrNull(timelineIndex) ?: -1
 
     private suspend fun awaitController(): MediaController? {
         controller?.let { return it }
@@ -240,6 +290,8 @@ class PlayerController(
         c.prepare()
         c.play()
         // 先给 UI 一份完整的队列，不用等时间线事件再通过 Binder 逐条读回来。
+        // 随机模式下这份顺序仍是入队顺序，等时间线事件到达后再按实际随机顺序展开。
+        setQueueOrder(IntArray(items.size) { it })
         _queue.value = PlayerQueueState(
             items = items,
             currentIndex = index,
@@ -248,9 +300,13 @@ class PlayerController(
         queueDirty = false
     }
 
-    /** 在播放队列面板里直接点某一首：跳到它的时间线位置并开始播放。 */
-    fun playQueueItem(index: Int) {
+    /**
+     * 在播放队列面板里直接点某一首：面板下标按当前（可能是随机的）显示顺序
+     * 换算回时间线位置，再跳过去播放。
+     */
+    fun playQueueItem(position: Int) {
         val c = controller ?: return
+        val index = timelineIndexByPosition.getOrNull(position) ?: return
         if (index !in 0 until c.mediaItemCount) return
         if (c.playbackState == Player.STATE_IDLE) c.prepare()
         if (index == c.currentMediaItemIndex) {
@@ -325,6 +381,7 @@ class PlayerController(
             it.clearMediaItems()
         }
         queueIds.clear()
+        setQueueOrder(IntArray(0))
         _queue.value = PlayerQueueState()
         queueDirty = true
     }
@@ -350,6 +407,7 @@ class PlayerController(
         ticker?.cancel()
         ticker = null
         queueIds.clear()
+        setQueueOrder(IntArray(0))
         _queue.value = PlayerQueueState()
         queueDirty = true
         controller?.let {

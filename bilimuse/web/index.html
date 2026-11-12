@@ -116,7 +116,6 @@
             </svg>
           </button>
           <div class="window-controls" id="window-controls" role="group" aria-label="窗口控制">
-            <span class="window-controls-divider" aria-hidden="true"></span>
             <button class="window-btn" id="win-min" data-win="min" title="最小化" aria-label="最小化">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
             </button>
@@ -157,7 +156,10 @@
 
   <footer class="player" id="player">
     <div class="now" id="now" title="打开播放详情">
-      <div class="now-cover" id="now-cover">♪</div>
+      <div class="now-cover-wrap">
+        <div class="now-cover" id="now-cover">♪</div>
+        <span class="now-eq" aria-hidden="true"><i></i><i></i><i></i></span>
+      </div>
       <div class="now-text">
         <div id="now-title">未在播放</div>
         <div class="muted small" id="now-sub">选择一首开始</div>
@@ -278,7 +280,6 @@
           </svg>
         </button>
         <div class="window-controls" id="np-window-controls" role="group" aria-label="窗口控制">
-          <span class="window-controls-divider" aria-hidden="true"></span>
           <button class="window-btn" id="np-win-min" data-win="min" title="最小化" aria-label="最小化">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
           </button>
@@ -303,6 +304,7 @@
     <div class="np-main">
       <section class="np-deck">
         <div class="np-art" id="np-art" aria-hidden="true">
+          <div class="np-art-cover np-art-cover-under" id="np-art-cover-under"></div>
           <div class="np-art-cover is-empty" id="np-art-cover">
             <div class="np-art-grooves"></div>
             <svg class="np-art-mark" viewBox="0 0 108 108" aria-hidden="true">
@@ -314,6 +316,7 @@
                 <path d="M48.4 34 L74.2 30.2 L74.2 37 L48.4 40.8 Z" />
               </g>
             </svg>
+            <div class="np-art-sheen" aria-hidden="true"></div>
             <div class="np-art-play">
               <svg class="np-i-play" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M8 5.3v13.4a1 1 0 0 0 1.53.85l10.4-6.7a1 1 0 0 0 0-1.7L9.53 4.45A1 1 0 0 0 8 5.3Z" />
@@ -592,7 +595,7 @@
 
         <div class="settings-rail-foot">
           <span class="rail-status"><i></i><span id="settings-rail-status">本地引擎已连接</span></span>
-          <span>v<span id="settings-version">0.2.3</span> · <span id="settings-runtime-mode">桌面版</span></span>
+          <span>v<span id="settings-version">0.2.4</span> · <span id="settings-runtime-mode">桌面版</span></span>
         </div>
       </aside>
 
@@ -892,7 +895,7 @@
                 <h3>BiliMuse</h3>
                 <p>把收藏夹变成歌单 · 本地播放器</p>
               </div>
-              <span class="about-version">v<span id="settings-version-inline">0.2.3</span></span>
+              <span class="about-version">v<span id="settings-version-inline">0.2.4</span></span>
             </div>
 
             <div class="settings-group">

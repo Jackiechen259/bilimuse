@@ -1,6 +1,8 @@
 package com.bilimuse.app
 
 import android.app.Application
+import coil.ImageLoader
+import coil.ImageLoaderFactory
 import com.bilimuse.app.data.BiliClient
 import com.bilimuse.app.data.DemoCdn
 import com.bilimuse.app.data.DemoCdnInterceptor
@@ -29,7 +31,7 @@ class AppContainer(context: Application) {
     )
 }
 
-class BiliMuseApp : Application() {
+class BiliMuseApp : Application(), ImageLoaderFactory {
     lateinit var container: AppContainer
         private set
 
@@ -37,4 +39,12 @@ class BiliMuseApp : Application() {
         super.onCreate()
         container = AppContainer(this)
     }
+
+    /**
+     * 全局图片交叉淡入：封面、头像等远程图片切换时不再硬切。
+     * 播放页 / 迷你条自己还会做一层「旧封面淡出、新封面浮入」的叠化。
+     */
+    override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
+        .crossfade(220)
+        .build()
 }

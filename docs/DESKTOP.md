@@ -70,6 +70,10 @@ scripts/
 端口用 0 而不是固定 8756：桌面版可能和网页版同时开着，也可能同时开两份，
 固定端口会直接冲突。
 
+启动页本身也带一层动效：标志缩放落位、内部双层虚线唱片环缓慢反向旋转、背后柔光呼吸，
+标题栏底边的进度发丝带光晕；边车启动失败时 `__bilimuseError` 会让进度条停住并切到错误态。
+这些动画在 `prefers-reduced-motion` 下全部关闭。
+
 ## 窗口与标题栏
 
 Windows 上主窗口是 `decorations(false)` 的无边框窗口，系统标题栏由页面顶栏兼任：
@@ -78,7 +82,8 @@ Windows 上主窗口是 `decorations(false)` 的无边框窗口，系统标题�
   侧栏顶部的品牌区（logo + BiliMuse）同样可以拖动窗口。
 - 顶栏右端三枚按钮调用 Tauri 窗口 API：最小化、最大化/还原、关闭。按钮只吃自己的
   点击，不影响顶栏其余位置的拖动；最大化图标会跟随 `onResized` 同步，所以拖到屏幕
-  边缘吸附、双击标题栏之后图标也是对的。
+  边缘吸附、双击标题栏之后图标也是对的。最大化 / 还原图标不是瞬间切换：两个 glyph
+  叠在同一个 grid cell 里，用透明度与轻微旋转交叉淡出，按钮按下时整体回弹一下。
 - 启动页带一条同样的迷你标题栏，边车还没起来时也能拖动/关闭窗口；进度光条贴着它的
   底边跑。
 - 阴影、圆角和描边交给 DWM 收尾：`shadow(true)` 负责无边框窗口的投影与 Win11 圆角，
@@ -330,8 +335,8 @@ cat .tauri/bilimuse.key.pub   # 填到 tauri.conf.json 的 plugins.updater.pubke
 2. 提交后打 tag 并推送：
 
    ```bash
-   git tag v0.2.3
-   git push origin v0.2.3
+   git tag v0.2.4
+   git push origin v0.2.4
    ```
 
 3. `.github/workflows/release.yml` 会为 Linux / Windows / macOS 构建安装包，并由
@@ -362,6 +367,13 @@ Linux 自动更新只保证 AppImage 安装方式可用；通过 `.deb` 安装�
   日志里能看到从 incognito webview 读到的 B 站 cookie（`_uuid`）
 - 无头 Chromium 实测随机播放：演示列表只加载 3 首、注入 6 首整夹列表后，开启随机得到
   6 首的播放队列，连点「下一首」能取到列表外的曲目；关闭随机后队列回到列表顺序
+- 无头 Chromium（1280×820）实测动效：启动错峰、列表 3 行的 `track-enter`、设置窗口开合
+  与分类切换、详情页指针倾斜（CSS 变量与高光 opacity 均生效）、切歌新旧封面交叉溶解、
+  主题 View Transition 圆形揭示、窗口按钮图标交叉淡出；开启 `prefers-reduced-motion`
+  后主题瞬时切换、设置立即开合、详情页无倾斜，控制台无错误
+- 真实 Tauri 窗口（WebView2 157 / 视口 1180×761 CSS px / DPI 1.75）实测：窗口按钮与
+  `is-windows` 生效、View Transition 圆形揭示、详情页指针倾斜与高光、底部迷你均衡器、
+  设置窗口开合与关闭后隐藏，控制台无错误
 - Python 测试 `39 passed`，覆盖整夹翻页（逐页请求、去重、空页/重复页/页数上限）
 
 ## 已知限制
@@ -372,6 +384,8 @@ Linux 自动更新只保证 AppImage 安装方式可用；通过 `.deb` 安装�
 - 还没做托盘/关闭到后台：关窗即退出，音乐随之停止
 - 还没做系统媒体键：网页版已经接了 Media Session，桌面壳后续可以补一层原生快捷键
 - 安装包比网页版大 ~20 MB，首次启动边车需要解包，约 0.5–1.5 秒
+- 主题圆形揭示依赖 View Transitions：WebKitGTK 或旧 WebView2 不支持时直接切换主题；
+  指针倾斜 / 环境光视差只在鼠标设备、且未开启「减少动态效果」时启用
 - Linux 的自动更新面向 AppImage；`.deb` 安装方式需要手动升级
 - 账号密码 / 短信登录的**成功路径**需要真实账号和极验交互，开发机没有账号可用于自动化测试；
   已验证官方页加载、自动切换、cookie 读取和取消/超时，cookie 换登录态部分由 Python 单测覆盖

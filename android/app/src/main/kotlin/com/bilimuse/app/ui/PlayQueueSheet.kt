@@ -1,7 +1,11 @@
 package com.bilimuse.app.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,7 +29,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -41,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,6 +57,7 @@ import com.bilimuse.app.player.PlayQueueUiState
  *
  * 手机屏幕窄，队列改成从底部拉起的面板；内容仍是当前队列、顺序 / 随机范围、
  * 当前曲目高亮、点任意行切歌、长队列懒加载、顺序播放时补下一页。
+ * 随机播放时列表本身已经按 ExoPlayer 当前的随机顺序排列，行号即随机队列里的位置。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,6 +74,9 @@ fun PlayQueueSheet(
         sheetState = sheetState,
         containerColor = BiliPanel,
         contentColor = BiliText,
+        tonalElevation = 0.dp,
+        scrimColor = Color.Black.copy(alpha = 0.55f),
+        shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
         dragHandle = { BottomSheetDragHandle() },
     ) {
         Column(
@@ -100,7 +108,9 @@ fun PlayQueueSheet(
 @Composable
 private fun QueueHeader(state: PlayQueueUiState, onDismiss: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth(),
+        Modifier
+            .fillMaxWidth()
+            .staggerIn(index = 0, distance = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -137,10 +147,14 @@ private fun QueueHeader(state: PlayQueueUiState, onDismiss: () -> Unit) {
                 }
             }
         }
-        IconButton(onClick = onDismiss) {
+        MotionIconButton(
+            onClick = onDismiss,
+            contentDescription = "关闭播放队列",
+            tint = BiliMuted,
+        ) {
             Icon(
                 Icons.Filled.Close,
-                contentDescription = "关闭播放队列",
+                contentDescription = null,
                 tint = BiliMuted,
             )
         }
@@ -159,8 +173,9 @@ private fun QueueList(
     var scrolledToCurrent by remember { mutableStateOf(false) }
 
     // 打开面板时把当前曲目滚进视野；之后只在当前曲目滚出视野时跟随，
-    // 用户手动翻看其他位置时不打扰。
-    LaunchedEffect(state.currentIndex, state.items.size) {
+    // 用户手动翻看其他位置时不打扰。随机播放切换顺序时 items 会整体换一份，
+    // 这里跟着重新定位当前曲目。
+    LaunchedEffect(state.items, state.currentIndex) {
         val index = state.currentIndex
         if (index !in state.items.indices) return@LaunchedEffect
         val visible = listState.layoutInfo.visibleItemsInfo
@@ -179,7 +194,9 @@ private fun QueueList(
     ) {
         itemsIndexed(
             items = state.items,
-            key = { index, item -> "${item.bvid}#$index" },
+            // 用曲目本身的 bvid 作 key：随机顺序重排时 Modifier.animateItem 才会把
+            // 同一首歌从旧位置平滑移到新位置，而不是整列闪一下。
+            key = { _, item -> item.bvid },
         ) { index, item ->
             QueueRow(
                 item = item,
@@ -187,6 +204,26 @@ private fun QueueList(
                 current = index == state.currentIndex,
                 isPlaying = isPlaying,
                 onClick = { onPlayIndex(index) },
+                modifier = Modifier
+                    .animateItem(
+                        fadeInSpec = null,
+                        placementSpec = LocalMotion.current.spring(
+                            dampingRatio = 0.86f,
+                            stiffness = 400f,
+                        ),
+                        fadeOutSpec = null,
+                    )
+                    .then(
+                        if (index < 12) {
+                            Modifier.staggerIn(
+                                index = index,
+                                distance = 8.dp,
+                                key = item.bvid,
+                            )
+                        } else {
+                            Modifier
+                        },
+                    ),
             )
         }
         item(key = "queue-footer") {
@@ -202,13 +239,32 @@ private fun QueueRow(
     current: Boolean,
     isPlaying: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
+    val motion = LocalMotion.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val background by animateColorAsState(
+        targetValue = if (current) BiliPink.copy(alpha = 0.09f) else Color.Transparent,
+        animationSpec = motion.tween(260),
+        label = "queue-row-background",
+    )
+    val indicator by animateFloatAsState(
+        targetValue = if (current) 1f else 0f,
+        animationSpec = motion.spring(dampingRatio = 0.7f, stiffness = 560f),
+        label = "queue-row-indicator",
+    )
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(if (current) BiliPink.copy(alpha = 0.08f) else Color.Transparent)
-            .clickable(onClickLabel = "播放", onClick = onClick)
+            .background(background)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClickLabel = "播放",
+                onClick = onClick,
+            )
+            .pressScale(interactionSource, pressedScale = 0.985f)
             .padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -216,8 +272,12 @@ private fun QueueRow(
             Modifier
                 .width(3.dp)
                 .height(42.dp)
+                .graphicsLayer {
+                    scaleY = indicator.coerceAtLeast(0.001f)
+                    alpha = indicator
+                }
                 .clip(RoundedCornerShape(2.dp))
-                .background(if (current) BiliPink else Color.Transparent),
+                .background(BiliPink),
         )
         Spacer(Modifier.width(9.dp))
         Box(
@@ -317,7 +377,7 @@ private fun QueueFooter(state: PlayQueueUiState, onLoadMore: () -> Unit) {
 @Composable
 private fun QueueEmpty(modifier: Modifier = Modifier) {
     Box(
-        modifier.fillMaxSize(),
+        modifier.fillMaxSize().staggerIn(index = 0, distance = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {

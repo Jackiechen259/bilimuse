@@ -80,6 +80,7 @@ android/
 │   │   ├── PlayQueueUiState.kt# 队列面板的纯展示状态与文案
 │   │   └── BtrDataSource.kt   # Media3 DataSource
 │   ├── ui/                    # Compose 界面、主题、登录/收藏夹/设置/更新/播放队列
+│   │   └── Motion.kt          # 动效令牌 / 减弱动效 / 按压 / 骨架屏 / 封面视差与主色
 │   ├── MainViewModel.kt
 │   └── MainActivity.kt
 └── app/src/test/kotlin/...    # JVM 测试（不需要模拟器）
@@ -116,7 +117,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:assembleRelease
 
 # 本地模拟 CI 的发布版本号（自动更新比较的就是 versionName）
-./gradlew :app:assembleRelease -PbilimuseVersionName=0.2.3 -PbilimuseVersionCode=203
+./gradlew :app:assembleRelease -PbilimuseVersionName=0.2.4 -PbilimuseVersionCode=204
 ```
 
 第一次构建会下载 Compose、Media3、OkHttp、Coil、ZXing 等依赖，约 1–3 分钟。
@@ -273,15 +274,15 @@ base64 -w0 bilimuse-release.jks   # macOS 用：base64 -i bilimuse-release.jks
 2. 打 tag 并推送：
 
    ```bash
-   git tag v0.2.3
-   git push origin v0.2.3
+   git tag v0.2.4
+   git push origin v0.2.4
    ```
 
 3. `.github/workflows/release.yml` 的 `android` job 会：
-   - 从 tag 解析 `versionName=0.2.3`、`versionCode=203`
+   - 从 tag 解析 `versionName=0.2.4`、`versionCode=204`
      （`major * 10000 + minor * 100 + patch`）；
    - 用 JDK 17 构建 `:app:assembleRelease`（有 Secrets 就用正式签名）；
-   - 把 APK 命名为 `BiliMuse-android-0.2.3.apk`，上传到同一个**草稿** Release。
+   - 把 APK 命名为 `BiliMuse-android-0.2.4.apk`，上传到同一个**草稿** Release。
 4. 打开 GitHub 的草稿 Release，确认 APK 已上传，再点 **Publish release**。只有发布后，
    应用内检查才能看到它。
 5. 已安装旧版本的设备在下次冷启动（或手动检查）时会看到更新。
@@ -324,6 +325,39 @@ APK 资产的选择规则：优先名字带 `universal` 的；其次没有 ABI �
 - 后台播放：锁屏、通知栏、耳机线控/蓝牙按键（MediaSession）
 - 演示模式：不登录也能跑通整条播放链路，每条连接限速 320 KB/s，可直观看到 BTR 与单连接的差别
 - GitHub Releases 自动更新：启动静默检查（可关）、设置页手动检查、下载进度、APK 完整性与签名校验后交给系统安装器
+- 界面动效：封面重力视差 / 主色环境光 / 切歌叠化、播放键呼吸光环、列表与队列错峰入场、
+  队列随机重排的位移动画、搜索栏展开、弹窗缩放淡入；设置 → 界面可关闭
+
+## 界面动效
+
+动效统一收在 `ui/Motion.kt`，所有页面通过 `LocalMotion` 读取同一份 `MotionSpec`，
+不直接写死 `tween()` 或 `spring()`。用户可以在 **设置 → 界面 → 界面动效** 关闭；
+系统打开「移除动画 / 减少动态效果」时也会自动停用（同时检查
+`ValueAnimator.areAnimatorsEnabled()` 与 `Settings.Global.ANIMATOR_DURATION_SCALE` /
+`TRANSITION_ANIMATION_SCALE`，并监听设置变化）。
+
+| 位置 | 动效 |
+| --- | --- |
+| 应用外壳 | 顶栏 / Logo / 收藏夹 chips / 标题错峰落位；迷你播放条从底部弹入 |
+| 收藏夹列表 | 前 14 行按 28ms 步长浮入；当前行指示条弹出、封面轻微放大、播放键换成跳动均衡器 |
+| 搜索 | 输入框 `expandVertically` + 淡入；清空按钮随输入内容缩放出现；搜索 / 关闭图标交叉淡出 |
+| 播放页 | 封面从 0.93 缩放落位，切歌时新旧封面交叉溶解；一道高光扫过；整页光晕随封面主色变化 |
+| 播放页封面 | 重力传感器做 ±7° 的 3D 视差，基线缓慢跟随当前握姿；高光中心跟着倾斜移动；动画状态只在 `graphicsLayer` / `drawBehind` 里读取，不触发整页重组 |
+| 播放键 | 按下收紧；播放中持续呼吸光环；播放 / 暂停图标缩放交叉淡入 |
+| 走带 | 进度用 600ms 线性补间磨平 500ms 的 tick；拖动时 thumb 放大并出现光晕；自绘轨道去掉默认末端停止点；换歌时重建 `Animatable`，不会倒着扫回去 |
+| 播放队列 | 底部面板圆角 + 55% 遮罩；行用稳定的 `bvid` 作 key，随机重排时 `animateItem` 平滑换位；当前行背景与指示条用 spring 过渡 |
+| 弹窗 | `MotionDialog` 统一做 0.92 → 1 的缩放 + 淡入，退出先缩回再关闭；登录二维码出现时缩放淡入，等待扫码时有一条扫描线 |
+| 队列 / 设置面板 | Material3 bottom sheet 的默认弹簧与圆角；队列内容错峰入场 |
+
+几个实现约定：
+
+- 动效只改 `graphicsLayer` 的透明度 / 位移 / 缩放，或用 `drawBehind` / `Canvas`，避免触发
+  measure / layout；列表、封面视差和背景光晕的逐帧状态都不在 composition 阶段读取。
+- 错峰下标在下标 16 处封顶，长列表不会越等越久；列表项只在第一次进入组合时入场。
+- 封面主色从 32×32 缩略图按色相分桶提取，不引入 Palette 依赖；灰度封面回退到主题粉色。
+- 所有新动效都走 `MotionSpec`，关闭动效时 `tween` / `spring` 退化成 `snap`，传感器和无限循环
+  动画直接不启动。
+- 抖动 / 翻转都限制在短时反馈（120–620ms），装饰性光晕放慢到 9–12 秒；不改变点击区域。
 
 ## 播放队列
 
@@ -337,8 +371,10 @@ APK 资产的选择规则：优先名字带 `universal` 的；其次没有 ABI �
   同一个收藏夹 / 搜索视图时才提供，避免把另一个收藏夹的内容混进当前队列。
 - 队列直接来自 MediaController 的实际时间线：通知栏、耳机线控和 Android Auto 切换曲目或改动队列，
   面板也会同步。队列可能上千首，面板用 `LazyColumn` 懒加载，打开时自动把当前曲目滚进视野。
-- 随机播放的推进顺序由 ExoPlayer 内部维护，面板按入队顺序展示媒体项并高亮当前曲目；
-  顺序播放时展示顺序与实际播放顺序一致。
+- 随机播放的推进顺序由 ExoPlayer 内部的 ShuffleOrder 维护；面板直接从时间线展开这一轮的
+  随机顺序（`Timeline.getFirstWindowIndex(true)` / `getNextWindowIndex(..., true)`），
+  所以行顺序就是实际播放顺序，`03 / 128` 是当前曲目在随机队列里的位置，点行时再换算回
+  时间线位置。队列补全、追加新曲目或切换随机模式后，面板会立即按新的随机顺序重排。
 
 数据流：
 
@@ -396,7 +432,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 
 ## 测试
 
-`./gradlew :app:testDebugUnitTest` 共 47 个 JVM 测试：
+`./gradlew :app:testDebugUnitTest` 共 55 个 JVM 测试：
 
 - **WbiTest**：mixin key、`w_rid`、中文/空格/特殊字符编码与 Python 实现一致
 - **BtrEngineTest**：
@@ -413,15 +449,17 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 - **PlayQueueUiStateTest**：顺序 / 随机队列的总数、进度文案、未加载提示、加载更多与空队列状态
 - **UpdateModelsTest**：版本号解析/排序、预发布版优先级、通用/ABI APK 选择、Release → AppUpdate、草稿/预发布过滤
 - **GitHubReleaseApiTest**：MockWebServer 模拟 404、正常 Release、403 限流、坏 JSON，并检查请求路径与 `Accept` 头
+- **MotionSpecTest**：关闭动效时错峰延迟归零、开启时按步长增长并在上限处封顶
 
 测试里的假 CDN 是真正的 `MockWebServer`，按连接限速并支持 Range，不是 mock 引擎内部。
 
 ## 已验证
 
 - `:app:assembleDebug` 成功，产物 `app-debug.apk` 约 14 MB
-- 47 个 JVM 测试全部通过
+- 55 个 JVM 测试全部通过
 - Pixel 8 API 36 模拟器（软件渲染）上用演示模式验证：播放 → 打开正在播放 → 打开队列面板 →
-  点选切歌 → 随机模式标签 → 返回关闭面板
+  点选切歌 → 随机模式标签 → 返回关闭面板；并实机验证错峰入场、播放页封面视差 / 主色光晕、
+  播放键光环、搜索展开、收藏夹页转场、队列面板与登录弹窗动画
 - JVM 基准（1 MB 文件、每条连接 400 KB/s）：单连接 ~2.6 s，BTR 645 ms，**约 4.1x**
 - 真实 B 站二维码接口冒烟通过：生成 `account.bilibili.com` 扫码 URL，轮询返回 `pending`
 - Compose 界面在 Robolectric 中以 411×891 dp 真实渲染通过，截图见 `assets/android*.png`
@@ -433,7 +471,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 
 ## 已知限制
 
-- 开发机没有可用的 KVM，**尚未在真机/模拟器上做完整的扫码 → 播放回归**；目前已验证编译、47 个 JVM 测试、真实二维码接口和 Robolectric 界面渲染。第一次装到手机上建议先用「演示模式」确认播放链路
+- 开发机没有可用的 KVM，**尚未在真机/模拟器上做完整的扫码 → 播放回归**；目前已验证编译、55 个 JVM 测试、真实二维码接口、Robolectric 界面渲染和模拟器上的演示播放 / 动效回归。第一次装到手机上建议先用「演示模式」确认播放链路
 - 自动更新需要 Release 已发布且包含 APK 资产；草稿 / Pre-release 不会被应用看到
 - Android 要求用户在系统安装器里确认，无法像桌面版那样静默安装；下载过程也不驻留后台服务
 - 自动更新的系统安装器、未知来源授权流程尚未在真机上回归（开发机没有可用 KVM）

@@ -9,10 +9,14 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bilimuse.app.ui.BiliMuseRoot
 import com.bilimuse.app.ui.BiliMuseTheme
+import com.bilimuse.app.ui.MotionProvider
 
 class MainActivity : ComponentActivity() {
     private val notificationPermission = registerForActivityResult(
@@ -28,8 +32,13 @@ class MainActivity : ComponentActivity() {
         )
         requestNotificationPermission()
         setContent {
+            val viewModel: MainViewModel = viewModel()
+            val settings by viewModel.settings.collectAsStateWithLifecycle()
             BiliMuseTheme {
-                BiliMuseRoot()
+                // 用户设置与系统「移除动画」在这里合成；所有页面动效都读同一个 LocalMotion。
+                MotionProvider(userEnabled = settings.motionEnabled) {
+                    BiliMuseRoot(viewModel)
+                }
             }
         }
     }

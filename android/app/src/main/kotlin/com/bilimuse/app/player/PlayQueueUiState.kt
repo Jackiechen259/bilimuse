@@ -8,9 +8,14 @@ import com.bilimuse.app.data.TrackItem
  * 队列内容本身来自 [PlayerController] 持有的 MediaController（通知栏、耳机线控、
  * Android Auto 改了队列也会同步进来）；这里再拼上当前播放来源的分页信息，
  * 让面板能和桌面版一样显示「顺序播放 / 随机播放」「03 / 128」以及未加载的尾页。
+ *
+ * 随机播放时 [items] 已经按 ExoPlayer 当前的随机顺序排列，[currentIndex] 是
+ * 当前曲目在这份顺序里的位置，所以行号、`03 / 128` 和实际下一首三者一致。
  */
 data class PlayQueueUiState(
+    /** 队列内容；随机播放时是当前这一轮的随机顺序。 */
     val items: List<TrackItem> = emptyList(),
+    /** 当前曲目在 [items] 里的位置。 */
     val currentIndex: Int = -1,
     val shuffle: Boolean = false,
     /** 随机池范围：整个收藏夹 / 全部搜索结果。 */

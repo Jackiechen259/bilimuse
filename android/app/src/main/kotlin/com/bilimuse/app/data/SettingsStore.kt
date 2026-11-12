@@ -18,6 +18,7 @@ class SettingsStore(context: Context) {
             .putInt(KEY_CHUNK, next.chunkSize)
             .putBoolean(KEY_LOSSLESS, next.preferLossless)
             .putBoolean(KEY_SHOW_BTR_DETAILS, next.showBtrDetails)
+            .putBoolean(KEY_MOTION, next.motionEnabled)
             .putStringSet(KEY_HIDDEN_FOLDERS, next.hiddenFolderIds.map { it.toString() }.toSet())
             .apply()
         _settings.value = next
@@ -35,6 +36,9 @@ class SettingsStore(context: Context) {
 
     fun setShowBtrDetails(enabled: Boolean): EngineSettings =
         update { it.copy(showBtrDetails = enabled) }
+
+    fun setMotionEnabled(enabled: Boolean): EngineSettings =
+        update { it.copy(motionEnabled = enabled) }
 
     fun setFolderHidden(folderId: Long, hidden: Boolean): EngineSettings = update { settings ->
         if (hidden) {
@@ -56,6 +60,7 @@ class SettingsStore(context: Context) {
         chunkSize = prefs.getInt(KEY_CHUNK, 512 * 1024),
         preferLossless = prefs.getBoolean(KEY_LOSSLESS, true),
         showBtrDetails = prefs.getBoolean(KEY_SHOW_BTR_DETAILS, true),
+        motionEnabled = prefs.getBoolean(KEY_MOTION, true),
         hiddenFolderIds = prefs.getStringSet(KEY_HIDDEN_FOLDERS, emptySet())
             .orEmpty()
             .mapNotNull { it.toLongOrNull() }
@@ -69,6 +74,7 @@ class SettingsStore(context: Context) {
         const val KEY_CHUNK = "chunk_size"
         const val KEY_LOSSLESS = "prefer_lossless"
         const val KEY_SHOW_BTR_DETAILS = "show_btr_details"
+        const val KEY_MOTION = "motion_enabled"
         const val KEY_HIDDEN_FOLDERS = "hidden_folders"
     }
 }

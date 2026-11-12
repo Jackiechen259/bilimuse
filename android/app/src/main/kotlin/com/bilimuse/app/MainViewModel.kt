@@ -873,6 +873,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         settingsStore.setShowBtrDetails(enabled)
     }
 
+    fun setMotionEnabled(enabled: Boolean) {
+        settingsStore.setMotionEnabled(enabled)
+    }
+
     // ------------------------------------------------------------------ 自动更新
 
     /** 手动检查：设置页入口。 */

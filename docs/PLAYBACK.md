@@ -26,6 +26,33 @@ Windows 无边框窗口的拖动区域与最小化 / 最大化 / 关闭按钮。
 快速淡出，外框随后让出，封面落回播放条。动效由 Web Animations API 驱动，桌面壳
 （WebView2）与浏览器表现一致；`prefers-reduced-motion` 时跳过飞行与错峰，直接显示。
 
+## 动效
+
+动效只服务于信息层级：谁先出现、谁跟着谁、操作在哪里得到回应。实现上没有引入
+动画库，CSS / Web Animations / View Transitions 三套原生能力分工使用；只有
+`transform`、`opacity`、`filter` 与主题揭示用的 `clip-path` 参与动画，不触发布局重排。
+
+| 场景 | 表现 |
+| --- | --- |
+| 应用启动 | 侧栏 / 顶栏 / 底部播放条按 20–80ms 的间隔从三个方向落位，品牌 logo 轻微回弹 |
+| 收藏夹与曲目列表 | 侧栏收藏夹按 16ms、曲目行按 17ms 错峰浮入（最多延迟 12 行）；悬停封面轻微放大；切夹 / 切歌时左侧指示条弹入 |
+| 主题切换 | 从被点击的圆点 / 卡片向外做圆形揭示；Chromium / WebView2 走 View Transitions，WebKit 或旧内核直接切换 |
+| 设置窗口 | 遮罩淡入、窗口带一点 spring 浮起，分类项 / 标题错峰；关闭时先轻微下沉淡出再 `hidden`；切换分类按方向滑入 |
+| 播放详情 | 小封面飞入（原有）；鼠标悬停封面时 3D 倾斜并出现跟随指针的高光，环境光同步视差；切歌时旧封面垫底、新封面柔焦交叉溶解，文案逐行浮入；队列前 14 行错峰，当前行轻微脉冲 |
+| 播放反馈 | 播放 / 暂停时播放键外扩一圈涟漪；底部小封面换歌时翻转；播放中右下角出现三格迷你均衡器 |
+| 进度条 | 悬停出现竖向预览线和时间气泡；拖动时滑块放大并加深色光环 |
+| 窗口按钮 | 最大化 / 还原图标交叉淡出，按下时按钮轻微回弹（仅 Windows 无边框窗口） |
+| 启动页 | 标志缩放落位、双层虚线唱片环缓慢反向旋转、背后柔光呼吸、进度发丝带光晕；启动失败时进度条停住 |
+
+**降级与打断**：`prefers-reduced-motion: reduce` 时 CSS 动效压到 0.001ms、JS 动效
+直接跳过；指针视差只在 `pointerType === 'mouse'` 且详情页稳定展示时启用。详情页
+入场未结束就按 `Esc` 会从当前帧接着退场；主题连点会 `skipTransition()` 上一轮；
+设置窗口与封面飞行都用令牌作废迟到的异步回调。
+
+`bilimuse/web/app.js` 顶部的 `motionAllowed()` 是 JS 侧唯一开关；`style.css` 的
+“动效增强”段落集中放令牌与 keyframes。调试时可在 DevTools 的 Rendering 面板打开
+“Emulate CSS prefers-reduced-motion”，或在 Console 里看 `document.getAnimations()`。
+
 ## 布局
 
 ```
@@ -201,9 +228,11 @@ B 站收藏夹里是视频，音轨本身没有歌词数据源。与其伪造一
 ## 文件
 
 - `bilimuse/web/index.html`：主题初始化脚本、`#now-playing` 结构、设置里的外观面板；
-- `bilimuse/web/style.css`：顶部主题令牌、`/* 播放详情 */` 段落；
-- `bilimuse/web/app.js`：`applyTheme` / `persistTheme`，`npSetQueue` / `npSetEngine`，
-  `npRender*` 系列，以及 `playTrackNow` / `refreshStats` / `updateShuffleUi` 的同步钩子；
+- `bilimuse/web/style.css`：顶部主题令牌、`/* 播放详情 */` 段落、`/* 动效增强 */` 段落
+  （motion tokens、View Transition、列表 / 设置 / 详情 / 走带的 keyframes）；
+- `bilimuse/web/app.js`：`applyTheme` / `persistTheme` / `chooseTheme`，`motionAllowed()` /
+  `restartClass()`，`npSetQueue` / `npSetEngine`，`npRender*` 系列，以及 `playTrackNow` /
+  `refreshStats` / `updateShuffleUi` 的同步钩子；
 - `bilimuse/config.py`、`bilimuse/server.py`：`theme` 的持久化与 `/api/settings` 校验；
 - 验收截图：[队列](../assets/playback-queue.png)、[传输详情](../assets/playback-engine.png)、
   [880×560 横向布局](../assets/playback-compact.png)。
@@ -219,4 +248,4 @@ B 站收藏夹里是视频，音轨本身没有歌词数据源。与其伪造一
 | 圆角 | 封面 10、队列行 6、抽屉 14、播放键全圆 |
 | 间距 | 8 / 12 / 16 / 24 / 34；舞台左右 `clamp(22px, 4vw, 48px)` |
 | 分割线 | 1px `--line-soft`，墨色 7%、纸色 7.5%、米色 9% 不透明度 |
-| 动效 | 详情入场约 480ms（封面飞行 420ms + 版面错峰淡入）、退场约 300ms、抽屉 240ms、均衡器 0.95–1.1s；`prefers-reduced-motion` 时跳过 |
+| 动效 | 详情入场约 480ms（封面飞行 420ms + 版面错峰淡入）、退场约 300ms、队列抽屉 380ms、设置窗口 380ms、列表行 16–17ms 错峰、主题揭示 560ms、均衡器 0.95–1.1s；`prefers-reduced-motion` 时全部跳过 |

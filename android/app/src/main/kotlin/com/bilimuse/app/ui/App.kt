@@ -4,6 +4,10 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -28,6 +32,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,6 +53,7 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
     val update by viewModel.update.collectAsStateWithLifecycle()
     val autoCheckUpdates by viewModel.autoCheckUpdates.collectAsStateWithLifecycle()
 
+    val motion = LocalMotion.current
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -128,7 +134,17 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
                     }
                 },
                 bottomBar = {
-                    if (player.bvid.isNotEmpty()) {
+                    AnimatedVisibility(
+                        visible = player.bvid.isNotEmpty(),
+                        enter = slideInVertically(
+                            initialOffsetY = { it },
+                            animationSpec = motion.spring(dampingRatio = 0.82f, stiffness = 320f),
+                        ) + fadeIn(motion.tween(MotionTokens.Base)),
+                        exit = slideOutVertically(
+                            targetOffsetY = { it },
+                            animationSpec = motion.tween(220, easing = MotionEase.In),
+                        ) + fadeOut(motion.tween(180)),
+                    ) {
                         MiniPlayer(
                             state = player,
                             onOpen = { showPlayer = true },
@@ -174,8 +190,22 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
 
         AnimatedVisibility(
             visible = showPlayer && player.bvid.isNotEmpty(),
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.zIndex(2f),
+            // 整页从下方轻轻托起，细节（封面 / 标题 / 走带 / 引擎）由页内错峰入场接着演。
+            enter = slideInVertically(
+                initialOffsetY = { it / 12 },
+                animationSpec = motion.spring(dampingRatio = 0.86f, stiffness = 300f),
+            ) + fadeIn(motion.tween(220)) + scaleIn(
+                initialScale = 0.97f,
+                animationSpec = motion.spring(dampingRatio = 0.9f, stiffness = 260f),
+            ),
+            exit = slideOutVertically(
+                targetOffsetY = { it / 14 },
+                animationSpec = motion.tween(260, easing = MotionEase.In),
+            ) + fadeOut(motion.tween(200)) + scaleOut(
+                targetScale = 0.985f,
+                animationSpec = motion.tween(260, easing = MotionEase.In),
+            ),
         ) {
             NowPlayingScreen(
                 state = player,
@@ -196,8 +226,15 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
 
         AnimatedVisibility(
             visible = showFavorites,
-            enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
-            exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
+            modifier = Modifier.zIndex(1f),
+            enter = slideInHorizontally(
+                initialOffsetX = { it / 6 },
+                animationSpec = motion.spring(dampingRatio = 0.88f, stiffness = 300f),
+            ) + fadeIn(motion.tween(MotionTokens.Base)),
+            exit = slideOutHorizontally(
+                targetOffsetX = { it / 5 },
+                animationSpec = motion.tween(260, easing = MotionEase.In),
+            ) + fadeOut(motion.tween(200)),
         ) {
             FavoritesScreen(
                 state = library,
@@ -265,6 +302,7 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
             onChunkSize = viewModel::setChunkSize,
             onLossless = viewModel::setPreferLossless,
             onShowBtrDetails = viewModel::setShowBtrDetails,
+            onMotionEnabled = viewModel::setMotionEnabled,
             onAutoCheckUpdates = viewModel::setAutoCheckUpdates,
             onCheckUpdate = viewModel::checkForUpdates,
             onOpenUpdate = {

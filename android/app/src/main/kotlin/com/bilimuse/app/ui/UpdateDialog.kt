@@ -35,7 +35,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.bilimuse.app.data.update.UpdateStatus
 import com.bilimuse.app.data.update.UpdateUiState
 import java.io.File
@@ -51,7 +50,7 @@ fun UpdateDialog(
     onOpenReleasePage: (String) -> Unit,
 ) {
     val update = state.update ?: return
-    Dialog(onDismissRequest = onDismiss) {
+    MotionDialog(onDismissRequest = onDismiss) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()

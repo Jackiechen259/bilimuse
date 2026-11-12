@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 APP_NAME = "bilimuse"
-VERSION = "0.2.3"
+VERSION = "0.2.4"
 THEMES = ("ink", "paper", "cream")
 
 

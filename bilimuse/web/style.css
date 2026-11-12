@@ -17,7 +17,12 @@
   --radius-lg: 14px;
   --radius-xl: 20px;
   --dur: 0.18s;
+  --dur-fast: 0.12s;
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+  /* 动效令牌：expo-out 收得干净，spring 只给「按下 / 弹出」这类短促反馈 */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.46, 0.64, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
 
   /* ---- 墨 · 黑白深色（默认） ---- */
   --bg: #0b0b0c;
@@ -532,6 +537,7 @@ kbd {
 }
 
 .topbar {
+  --topbar-pad-x: 36px;
   position: relative;
   z-index: 6;
   flex: none;
@@ -539,7 +545,7 @@ kbd {
   align-items: center;
   gap: 24px;
   min-height: 92px;
-  padding: 18px 36px 16px;
+  padding: 18px var(--topbar-pad-x) 16px;
   border-bottom: 1px solid var(--line-soft);
   background: var(--topbar-bg);
   backdrop-filter: blur(14px);
@@ -647,13 +653,9 @@ html.is-windows .window-controls {
   display: flex;
   align-items: center;
   gap: 2px;
-  margin-left: 4px;
-}
-.window-controls-divider {
-  width: 1px;
-  height: 22px;
-  margin: 0 8px 0 2px;
-  background: var(--line-soft);
+  /* 原先左侧有一枚分隔竖线；去掉后把它的占位（11px + 一个 2px 间隙）
+     并进左边距，按钮与设置按钮的相对位置保持不变 */
+  margin-left: 17px;
 }
 .window-btn {
   width: 32px;
@@ -673,6 +675,16 @@ html.is-windows .window-controls {
 .window-btn .glyph-restore { display: none; }
 .window-btn.is-maximized .glyph-max { display: none; }
 .window-btn.is-maximized .glyph-restore { display: block; }
+
+/* 三枚标题栏按钮往右上角靠：只做视觉位移（position: relative），
+   原来的 flex 槽位保留，搜索框与设置按钮的排版不会跟着动。
+   默认窗口下按钮距顶 16px（与标题首行齐平）、距右 10px；
+   right 用顶栏自身的左右内边距换算，放大窗口后离右边仍然是 10px。 */
+html.is-windows .topbar .window-controls {
+  position: relative;
+  top: -19px;
+  right: calc(10px - var(--topbar-pad-x, 36px));
+}
 
 /* ================================================================== 曲目列表 */
 
@@ -2615,7 +2627,7 @@ html.is-windows .np-header { padding-right: 6px; }
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   background: var(--bg-elev);
   box-shadow: var(--shadow-lg);
-  animation: sheet-up 0.24s var(--ease);
+  animation: sheet-up 0.4s var(--ease-out);
 }
 @keyframes sheet-up { from { transform: translateY(28px); opacity: 0.6; } to { transform: none; opacity: 1; } }
 .np-sheet-head {
@@ -2846,11 +2858,339 @@ html.is-windows .np-header { padding-right: 6px; }
 .np-toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
 .np-toast.is-error { color: var(--danger); border-color: var(--danger); }
 
+/* ============================================================== 动效增强
+   原则：只动 transform / opacity / filter，时长 120–600ms，弹层与页面切换
+   用 expo-out，按下反馈用很短的 spring；所有新动效都受 prefers-reduced-motion
+   与 JS 里的 motionAllowed() 双重约束。 */
+
+/* ---- 主题切换：Chromium / WebView2 的 View Transitions 圆形揭示 ---- */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-group(root) { animation: none; }
+::view-transition-old(root) { z-index: 1; }
+::view-transition-new(root) { z-index: 2; }
+
+/* ---- 应用外壳：启动时错峰落位 ---- */
+@keyframes shell-in-left {
+  from { opacity: 0; transform: translate3d(-12px, 0, 0); }
+}
+@keyframes shell-in-down {
+  from { opacity: 0; transform: translate3d(0, -10px, 0); }
+}
+@keyframes shell-in-up {
+  from { opacity: 0; transform: translate3d(0, 16px, 0); }
+}
+@keyframes logo-settle {
+  from { opacity: 0; transform: scale(0.82) rotate(-10deg); }
+  60% { opacity: 1; }
+}
+.sidebar { animation: shell-in-left 0.52s var(--ease-out) both; }
+.topbar { animation: shell-in-down 0.56s var(--ease-out) 0.02s both; }
+.player { animation: shell-in-up 0.62s var(--ease-out) 0.08s both; }
+.brand .logo { animation: logo-settle 0.82s var(--ease-spring) both; }
+
+/* ---- 收藏夹：列表错峰入场，选中条弹入 ---- */
+@keyframes folder-enter {
+  from { opacity: 0; transform: translate3d(-6px, 0, 0); }
+}
+.folder.is-entering {
+  animation: folder-enter 0.34s var(--ease-out) backwards;
+  animation-delay: calc(var(--folder-i, 0) * 16ms);
+}
+@keyframes folder-bar {
+  from { opacity: 0; transform: scaleY(0.3); }
+}
+.folder.active::before {
+  transform-origin: center;
+  animation: folder-bar 0.38s var(--ease-out);
+}
+
+/* ---- 曲目列表：错峰入场、封面悬浮、切歌高亮 ---- */
+@keyframes track-enter {
+  from { opacity: 0; transform: translate3d(0, 9px, 0); }
+}
+.track.is-entering {
+  animation: track-enter 0.42s var(--ease-out) backwards;
+  animation-delay: calc(var(--enter-i, 0) * 17ms);
+}
+.track .cover {
+  transition: transform 0.4s var(--ease-out), box-shadow 0.3s var(--ease-out);
+}
+.track.active .cover {
+  box-shadow: inset 0 0 0 1px var(--accent-line), 0 10px 22px -16px var(--accent);
+}
+.track:hover .cover,
+.track.active:hover .cover { transform: scale(1.055); }
+@keyframes track-bar {
+  from { opacity: 0; transform: scaleY(0.2); }
+}
+.track.just-activated::before {
+  transform-origin: center;
+  animation: track-bar 0.55s var(--ease-out);
+}
+
+/* 标题换字：只在新文字上做一次低调的浮入，不改变布局宽度 */
+.titles h2.is-swapping,
+.now-text #now-title.is-swapping,
+.now-text #now-sub.is-swapping {
+  animation: title-swap 0.4s var(--ease-out);
+}
+@keyframes title-swap {
+  from { opacity: 0; transform: translate3d(0, 7px, 0); filter: blur(2px); }
+}
+
+/* ---- 窗口按钮：最大化 / 还原图标交叉淡出，而不是瞬间切换 ---- */
+.window-btn { position: relative; transition: background var(--dur), color var(--dur), transform var(--dur-fast); }
+.window-btn svg {
+  grid-area: 1 / 1;
+  transition: opacity 0.18s var(--ease), transform 0.26s var(--ease-out);
+}
+.window-btn .glyph-restore {
+  display: block;
+  opacity: 0;
+  transform: scale(0.72) rotate(-14deg);
+}
+.window-btn.is-maximized .glyph-max {
+  display: block;
+  opacity: 0;
+  transform: scale(0.72) rotate(14deg);
+}
+.window-btn.is-maximized .glyph-restore { display: block; opacity: 1; transform: none; }
+.window-btn:active { transform: scale(0.94); }
+
+/* ---- 小交互：齿轮、主题圆点、开关、走带键 ---- */
+#settings-btn svg { transition: transform 0.5s var(--ease-spring); }
+#settings-btn:hover svg { transform: rotate(45deg); }
+.theme-dot { transition: transform 0.28s var(--ease-spring); }
+.theme-opt:hover .theme-dot { transform: scale(1.14); }
+.switch span { transition: background var(--dur) var(--ease); }
+.switch span::after { transition: transform 0.26s var(--ease-spring), background var(--dur); }
+.theme-card { transition: border-color var(--dur), transform 0.22s var(--ease-out); }
+.settings-close svg { transition: transform 0.28s var(--ease-spring); }
+.settings-close:hover svg { transform: rotate(90deg); }
+.np-ctrl {
+  transition: color var(--dur), background var(--dur), transform 0.22s var(--ease-spring);
+}
+.np-ctrl:hover { transform: scale(1.06); }
+.np-ctrl:active { transform: scale(0.94); }
+.np-back { transition: color var(--dur), border-color var(--dur), background var(--dur), transform 0.22s var(--ease-spring); }
+.np-back:hover { transform: translateX(-1px); }
+
+/* 气泡提示：从下方带一点弹性地浮上来 */
+.settings-toast {
+  transform: translateY(6px) scale(0.97);
+  transition: opacity 0.18s ease, transform 0.26s var(--ease-spring);
+}
+.settings-toast.visible { transform: none; }
+.np-toast {
+  transform: translate(-50%, 8px) scale(0.96);
+  transition: opacity 0.2s ease, transform 0.3s var(--ease-spring);
+}
+.np-toast.is-visible { transform: translate(-50%, 0) scale(1); }
+
+/* ---- 设置窗口：由 JS 编排的打开 / 关闭，分类内容错峰 ---- */
+.settings-window { animation: none; }
+.settings-modal.is-animating .settings-window,
+.settings-modal.is-closing .settings-window { will-change: transform, opacity; }
+
+.settings-pane.active {
+  animation: pane-in 0.26s var(--ease-out) both;
+}
+.settings-pane[data-dir="back"].active { animation-name: pane-in-back; }
+@keyframes pane-in {
+  from { opacity: 0; transform: translate3d(9px, 0, 0); }
+}
+@keyframes pane-in-back {
+  from { opacity: 0; transform: translate3d(-9px, 0, 0); }
+}
+.settings-pane.active > * {
+  animation: group-in 0.34s var(--ease-out) backwards;
+  animation-delay: calc(var(--group-i, 0) * 24ms);
+}
+@keyframes group-in {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+}
+
+/* ---- 播放详情：指针视差、封面倾斜与高光 ---- */
+.np-art {
+  transform: perspective(1200px) rotateX(var(--np-tilt-x, 0deg)) rotateY(var(--np-tilt-y, 0deg)) translateZ(0);
+  transition: transform 0.62s var(--ease-out), box-shadow 0.4s var(--ease-out);
+}
+.now-playing.np-tilt-live .np-art { transition-duration: 0.08s; }
+.np-art-sheen {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    circle at var(--np-glare-x, 30%) var(--np-glare-y, 18%),
+    rgba(255, 255, 255, 0.34),
+    rgba(255, 255, 255, 0) 46%
+  );
+  mix-blend-mode: soft-light;
+  transition: opacity 0.4s var(--ease-out);
+}
+.now-playing.np-tilt-live .np-art-sheen { opacity: 1; }
+
+.np-ambient {
+  transform: translate3d(var(--np-ambient-x, 0px), var(--np-ambient-y, 0px), 0) scale(1.065);
+  transition: transform 0.9s var(--ease-out), opacity 0.5s ease;
+}
+.now-playing.np-ambient-live .np-ambient {
+  transition: transform 0.2s linear, opacity 0.5s ease;
+}
+
+/* 切歌：封面从柔焦里显影，环境光同步换气，文字逐行浮入 */
+.np-art-cover.is-swapping { animation: np-cover-swap 0.6s var(--ease-out); }
+@keyframes np-cover-swap {
+  from { opacity: 0; transform: scale(1.045); filter: blur(7px) saturate(1.08); }
+}
+.np-ambient.is-swapping { animation: np-ambient-swap 0.9s var(--ease-out); }
+@keyframes np-ambient-swap {
+  from { opacity: calc(var(--ambient-opacity) * 0.3); }
+}
+.np-trackline.is-swapping > * {
+  animation: np-line-in 0.46s var(--ease-out) backwards;
+  animation-delay: calc(var(--line-i, 0) * 28ms);
+}
+@keyframes np-line-in {
+  from { opacity: 0; transform: translate3d(0, 9px, 0); }
+}
+
+/* ---- 播放详情：播放键涟漪 + 队列错峰 ---- */
+.np-play,
+.buttons .play { position: relative; }
+.np-play::after,
+.buttons .play::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1px solid var(--accent-line);
+  opacity: 0;
+  pointer-events: none;
+}
+.np-play.is-pulsing::after,
+.buttons .play.is-pulsing::after { animation: play-ring 0.62s var(--ease-out); }
+@keyframes play-ring {
+  0% { opacity: 0.7; transform: scale(0.92); }
+  100% { opacity: 0; transform: scale(1.4); }
+}
+
+.np-q-row.is-entering-row {
+  animation: np-q-in 0.38s var(--ease-out) backwards;
+  animation-delay: calc(var(--q-i, 0) * 14ms);
+}
+@keyframes np-q-in {
+  from { opacity: 0; transform: translate3d(10px, 0, 0); }
+}
+.np-q-row.is-just-current { animation: np-q-current 0.55s var(--ease-out); }
+@keyframes np-q-current {
+  from { opacity: 0.4; transform: translate3d(-6px, 0, 0); }
+}
+
+/* ---- 底部播放条：换封面翻转 + 播放时的迷你均衡器 ---- */
+.now-cover-wrap {
+  position: relative;
+  width: 50px;
+  height: 50px;
+  flex: none;
+}
+.now-cover-wrap .now-cover { width: 100%; height: 100%; }
+.now-cover.is-turning { animation: now-cover-swap 0.5s var(--ease-out); }
+@keyframes now-cover-swap {
+  from { opacity: 0.35; transform: rotateY(-18deg) scale(0.88); }
+}
+.now.is-live .now-cover {
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    var(--shadow-sm),
+    0 0 22px -8px var(--accent);
+}
+.now-eq {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 11px;
+  padding: 3px 4px;
+  border-radius: 3px;
+  background: rgba(8, 8, 9, 0.6);
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.22s ease, visibility 0.22s;
+}
+.now.is-live .now-eq { opacity: 1; visibility: visible; }
+
+/* 详情页封面右下角的均衡器同样用淡入淡出，而不是整块闪现 */
+.np-art-eq {
+  display: flex;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.24s ease, visibility 0.24s;
+}
+.np-art.is-playing .np-art-eq { display: flex; opacity: 1; visibility: visible; }
+.now-eq i {
+  width: 1.5px;
+  height: 5px;
+  border-radius: 1px;
+  background: #f4f1ea;
+  transform-origin: bottom;
+  animation: np-eq 0.95s ease-in-out infinite;
+}
+.now-eq i:nth-child(2) { height: 8px; animation-delay: -0.3s; }
+.now-eq i:nth-child(3) { height: 4px; animation-delay: -0.55s; }
+
+/* ---- 走带：悬停预览线、磁吸滑块 ---- */
+.seek,
+.np-seek { --seek-hover: 0%; }
+.seek::after,
+.np-seek::after {
+  content: "";
+  position: absolute;
+  left: var(--seek-hover);
+  width: 1px;
+  border-radius: 1px;
+  background: var(--muted);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+  transition: opacity 0.14s ease;
+}
+.seek::after { top: 2px; height: 8px; }
+.np-seek::after { top: 4px; height: 10px; }
+.seek:hover::after,
+.np-seek:hover::after { opacity: 0.55; }
+.seek-knob,
+.np-seek-knob {
+  transition: opacity var(--dur), transform 0.18s var(--ease-spring), box-shadow 0.18s ease;
+}
+.seek:hover .seek-knob { transform: translate(-50%, -50%) scale(1.18); }
+.seek.is-dragging .seek-knob {
+  transform: translate(-50%, -50%) scale(1.5);
+  box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 6px var(--accent-soft);
+}
+.np-seek:hover .np-seek-knob { transform: translate(-50%, -50%) scale(1.18); }
+.np-seek.is-dragging .np-seek-knob {
+  transform: translate(-50%, -50%) scale(1.5);
+  box-shadow: 0 0 0 3px var(--bg), 0 0 0 7px var(--accent-soft);
+}
+
 /* ===================================================================== 响应式 */
 
 @media (max-width: 1200px) {
   .app { grid-template-columns: 248px minmax(0, 1fr); }
-  .topbar { padding: 16px 26px 14px; }
+  .topbar { --topbar-pad-x: 26px; padding: 16px var(--topbar-pad-x) 14px; }
   .list-head, .track { padding: 0 26px; }
   .tracks-footer { padding-left: 26px; padding-right: 26px; }
   .player { grid-template-columns: minmax(0, 1fr) minmax(300px, 440px) minmax(0, 1fr); gap: 18px; padding: 0 24px; }
@@ -2882,7 +3222,7 @@ html.is-windows .np-header { padding-right: 6px; }
     box-shadow: var(--shadow-lg);
     transform: translateX(102%);
     visibility: hidden;
-    transition: transform 0.26s var(--ease), visibility 0.26s;
+    transition: transform 0.38s var(--ease-out), visibility 0.38s;
   }
   .now-playing.np-queue-open .np-queue-rail {
     transform: none;
@@ -2905,10 +3245,11 @@ html.is-windows .np-header { padding-right: 6px; }
   .app { grid-template-columns: 1fr; }
   .sidebar { display: none; }
   .topbar {
+    --topbar-pad-x: 16px;
     min-height: 0;
     flex-wrap: wrap;
     gap: 12px;
-    padding: 16px 16px 14px;
+    padding: 16px var(--topbar-pad-x) 14px;
   }
   .titles { flex: 1 1 100%; }
   .titles h2 { font-size: 20px; }
@@ -3056,7 +3397,13 @@ html.is-windows .np-header { padding-right: 6px; }
   *, *::before, *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0.001ms !important;
   }
 }
