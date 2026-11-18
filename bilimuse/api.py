@@ -47,6 +47,36 @@ class NotLoggedIn(BiliError):
         super().__init__(-101, message)
 
 
+# 字幕地址白名单：接口返回的 subtitle_url 一旦被篡改，服务端不能当开放代理
+SUBTITLE_HOSTS = ("hdslb.com", "bilibili.com", "bilivideo.com")
+SUBTITLE_BASE = "https://www.bilibili.com"
+
+
+def subtitle_url(url: str) -> str:
+    """校验并补全 B 站字幕地址，不合法直接抛 BiliError。
+
+    只允许 https，host 必须等于或后缀属于白名单域名；``//host/x`` 与相对
+    地址分别补全成 https 和 ``https://www.bilibili.com`` 下的绝对地址。
+    """
+    raw = str(url or "").strip()
+    if not raw:
+        raise BiliError(-1, "字幕地址为空")
+    if raw.startswith("//"):
+        raw = "https:" + raw
+    parsed = urllib.parse.urlsplit(raw)
+    if not parsed.scheme:
+        raw = urllib.parse.urljoin(f"{SUBTITLE_BASE}/", raw.lstrip("/"))
+        parsed = urllib.parse.urlsplit(raw)
+    if parsed.scheme.lower() != "https":
+        raise BiliError(-1, "字幕地址必须使用 https")
+    host = (parsed.hostname or "").lower()
+    if not host or not any(
+        host == domain or host.endswith("." + domain) for domain in SUBTITLE_HOSTS
+    ):
+        raise BiliError(-1, "字幕地址不在允许的域名内")
+    return raw
+
+
 def _mixin_key(orig: str) -> str:
     return "".join(orig[i] for i in _MIXIN_KEY_TAB)[:32]
 
@@ -320,6 +350,45 @@ class BiliClient:
             "part": str(first.get("part") or ""),
             "page_count": len(pages),
         }
+
+    # ---------------------------------------------------------------- 字幕
+
+    async def subtitle_tracks(self, bvid: str, cid: int) -> list[dict[str, Any]]:
+        """取一个分P的字幕轨道列表；地址不合法或没登录时返回空列表。
+
+        人工字幕的 ``lan`` 不以 ``ai-`` 开头，AI 转写的是 ``ai-zh``。
+        没有 url 的轨道（未登录时 B 站会这样返回）直接丢掉。
+        """
+        data = await self._get(f"{API}/x/player/v2", {"bvid": bvid, "cid": cid})
+        subtitle = data.get("subtitle") if isinstance(data, dict) else None
+        raw = (subtitle or {}).get("subtitles") if isinstance(subtitle, dict) else None
+        tracks: list[dict[str, Any]] = []
+        for item in raw or []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                url = subtitle_url(str(item.get("subtitle_url") or ""))
+            except BiliError:
+                continue
+            tracks.append(
+                {
+                    "id": int(item.get("id") or 0),
+                    "lan": str(item.get("lan") or ""),
+                    "label": str(item.get("lan_doc") or ""),
+                    "url": url,
+                }
+            )
+        return tracks
+
+    async def subtitle_body(self, url: str) -> dict[str, Any]:
+        """下载字幕 JSON（只走白名单地址），返回原始 dict。"""
+        target = subtitle_url(url)
+        resp = await self.http.get(target)
+        resp.raise_for_status()
+        body = resp.json()
+        if not isinstance(body, dict):
+            raise BiliError(-1, "字幕内容格式不正确")
+        return body
 
     async def playurl(self, bvid: str, cid: int) -> dict[str, Any]:
         await self.ensure_buvid()

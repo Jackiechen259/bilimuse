@@ -52,6 +52,8 @@ CONFIG_DIR = Path(os.environ.get("BILIMUSE_CONFIG_DIR") or _default_config_dir()
 SESSION_FILE = CONFIG_DIR / "session.json"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 CACHE_DIR = Path(os.environ.get("BILIMUSE_CACHE_DIR") or _default_cache_dir())
+# 用户歌词：导入的 LRC 与按 bvid 的偏好（偏移 / 锁定来源）
+LYRICS_DIR = CONFIG_DIR / "lyrics"
 
 WEB_DIR = _web_dir()
 
@@ -105,6 +107,10 @@ class Settings:
     volume: float = 0.9
     autoplay_next: bool = True
 
+    # 歌词来源：关闭后直接跳过对应来源，本地 LRC 与演示歌词不受影响
+    lyrics_online: bool = field(default_factory=lambda: _env_bool("BILIMUSE_LYRICS_ONLINE", True))
+    lyrics_bili: bool = field(default_factory=lambda: _env_bool("BILIMUSE_LYRICS_BILI", True))
+
     # 收藏夹显示：存被隐藏的收藏夹 ID，新收藏夹默认可见
     hidden_folders: list[int] = field(default_factory=list)
 
@@ -134,6 +140,8 @@ class Settings:
             "prefer_lossless": self.prefer_lossless,
             "volume": round(self.volume, 2),
             "autoplay_next": self.autoplay_next,
+            "lyrics_online": self.lyrics_online,
+            "lyrics_bili": self.lyrics_bili,
             "hidden_folders": list(self.hidden_folders),
             "theme": self.theme,
         }
@@ -163,6 +171,10 @@ class Settings:
             self.volume = float(raw["volume"])
         if isinstance(raw.get("autoplay_next"), bool):
             self.autoplay_next = raw["autoplay_next"]
+        if isinstance(raw.get("lyrics_online"), bool):
+            self.lyrics_online = raw["lyrics_online"]
+        if isinstance(raw.get("lyrics_bili"), bool):
+            self.lyrics_bili = raw["lyrics_bili"]
         if isinstance(raw.get("theme"), str) and raw["theme"] in THEMES:
             self.theme = raw["theme"]
         if isinstance(raw.get("hidden_folders"), list):

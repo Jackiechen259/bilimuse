@@ -27,6 +27,13 @@ from . import auth, demo
 from .api import BiliClient, BiliError, FAV_MAX_PAGE_SIZE, NotLoggedIn, pick_audio
 from .btr import BTRStream, SimpleStream, StreamError, build_stream
 from .config import CACHE_DIR, REFERER, THEMES, UA, VERSION, WEB_DIR, settings
+from .lyrics import (
+    LRCLIB_UA,
+    MAX_LRC_BYTES,
+    LyricsService,
+    is_valid_bvid,
+    none_result,
+)
 
 MEDIA_HEADERS = {
     "User-Agent": UA,
@@ -102,6 +109,9 @@ DESKTOP_LOGIN_CLAIM_TIMEOUT = 30.0
 class State:
     bili: BiliClient | None = None
     media: httpx.AsyncClient | None = None
+    # 歌词：独立、不带 B 站 Cookie 的 LRCLIB 客户端 + 解析服务
+    lrclib: httpx.AsyncClient | None = None
+    lyrics: LyricsService | None = None
     tracks: "OrderedDict[str, Track]" = OrderedDict()
     by_bvid: dict[str, tuple[str, float]] = {}
     resolve_locks: dict[str, asyncio.Lock] = {}
@@ -126,12 +136,22 @@ async def lifespan(app: FastAPI):
         follow_redirects=True,
         limits=httpx.Limits(max_connections=96, max_keepalive_connections=48),
     )
+    # LRCLIB 必须走独立客户端：绝不带上 B 站 Cookie / Referer（隐私契约）
+    state.lrclib = httpx.AsyncClient(
+        headers={"User-Agent": LRCLIB_UA, "Accept": "application/json"},
+        timeout=httpx.Timeout(6.0, connect=4.0),
+        follow_redirects=True,
+        limits=httpx.Limits(max_connections=8, max_keepalive_connections=4),
+    )
+    state.lyrics = LyricsService(state.bili, state.lrclib)
     if state.demo_mode:
         state.demo_files = demo.ensure_audio(CACHE_DIR)
         state.demo_bvid_to_idx = {t["bvid"]: i for i, t in enumerate(demo.DEMO_TRACKS)}
     yield
     await state.bili.close()
     await state.media.aclose()
+    if state.lrclib is not None:
+        await state.lrclib.aclose()
 
 
 app = FastAPI(title="BiliMuse", version=VERSION, lifespan=lifespan)
@@ -701,6 +721,160 @@ async def api_stats(sid: str) -> dict[str, Any]:
     return snap
 
 
+# ------------------------------------------------------------------ 歌词
+
+
+class LyricsImport(BaseModel):
+    lrc: str = ""
+
+
+class LyricsPrefsPatch(BaseModel):
+    offset: float | None = None
+    pin_source: str | None = None
+    pin_id: int | None = None
+
+
+class LyricsUse(BaseModel):
+    id: int
+
+
+def _lyrics_bvid(bvid: str) -> str:
+    """bvid 是路径参数：不合法直接 400，任何情况下都不拼路径。"""
+    if not is_valid_bvid(bvid):
+        raise HTTPException(400, "bvid 不合法")
+    return bvid
+
+
+@app.get("/api/lyrics/search")
+async def api_lyrics_search(q: str = "") -> dict[str, Any]:
+    """LRCLIB 搜索（换源 / 手改匹配用），最多 10 条。"""
+    svc = state.lyrics
+    if svc is None:
+        return {"items": []}
+    try:
+        items = await svc.search(q)
+    except Exception:
+        items = []
+    return {"items": items}
+
+
+@app.get("/api/lyrics/{bvid}")
+async def api_lyrics(
+    bvid: str,
+    title: str = "",
+    upper: str = "",
+    duration: float = 0.0,
+    refresh: int = 0,
+) -> dict[str, Any]:
+    """解析歌词；除非法 bvid（400）外永远 200，错误退化成 status:none。"""
+    _lyrics_bvid(bvid)
+    svc = state.lyrics
+    if svc is None:
+        return none_result("error")
+    try:
+        return await svc.resolve(
+            bvid,
+            title=title,
+            upper=upper,
+            duration=duration,
+            refresh=bool(refresh),
+        )
+    except Exception:
+        return none_result("error")
+
+
+@app.get("/api/lyrics/{bvid}/sources")
+async def api_lyrics_sources(
+    bvid: str,
+    title: str = "",
+    upper: str = "",
+    duration: float = 0.0,
+) -> dict[str, Any]:
+    """换源菜单：各来源可用性与标签。"""
+    _lyrics_bvid(bvid)
+    svc = state.lyrics
+    if svc is None:
+        return {"items": []}
+    try:
+        items = await svc.sources(bvid, title=title, upper=upper, duration=duration)
+    except Exception:
+        items = []
+    return {"items": items}
+
+
+@app.post("/api/lyrics/{bvid}")
+async def api_lyrics_import(bvid: str, payload: LyricsImport) -> dict[str, Any]:
+    """导入本地 LRC；超过 256 KB 或内容为空返回 400。"""
+    _lyrics_bvid(bvid)
+    svc = state.lyrics
+    if svc is None:
+        return none_result("error")
+    text = payload.lrc or ""
+    try:
+        size = len(text.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise HTTPException(400, "歌词内容不是有效的文本")
+    if size > MAX_LRC_BYTES:
+        raise HTTPException(400, "歌词文件超过 256 KB")
+    try:
+        return await svc.import_lrc(bvid, text)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception:
+        return none_result("error")
+
+
+@app.delete("/api/lyrics/{bvid}")
+async def api_lyrics_delete(bvid: str) -> dict[str, Any]:
+    """删除本地 LRC 与抓取缓存，不动用户偏好。"""
+    _lyrics_bvid(bvid)
+    svc = state.lyrics
+    if svc is None:
+        return {"ok": False}
+    try:
+        return await svc.delete(bvid)
+    except Exception:
+        return {"ok": False}
+
+
+@app.post("/api/lyrics/{bvid}/prefs")
+async def api_lyrics_prefs(bvid: str, payload: LyricsPrefsPatch) -> dict[str, Any]:
+    """更新偏移 / 锁定来源；字段可省略，传 null 表示清除。"""
+    _lyrics_bvid(bvid)
+    svc = state.lyrics
+    if svc is None:
+        raise HTTPException(503, "歌词服务未就绪")
+    kwargs: dict[str, Any] = {}
+    fields = payload.model_fields_set
+    if "offset" in fields:
+        kwargs["offset"] = payload.offset
+    if "pin_source" in fields:
+        kwargs["pin_source"] = payload.pin_source
+    if "pin_id" in fields:
+        kwargs["pin_id"] = payload.pin_id
+    try:
+        return svc.update_prefs(bvid, **kwargs)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception:
+        return {"offset": 0.0, "pin": None}
+
+
+@app.post("/api/lyrics/{bvid}/use")
+async def api_lyrics_use(bvid: str, payload: LyricsUse) -> dict[str, Any]:
+    """采用某条 LRCLIB 候选并锁定。"""
+    _lyrics_bvid(bvid)
+    svc = state.lyrics
+    if svc is None:
+        return none_result("error")
+    try:
+        return await svc.use_lrclib(bvid, payload.id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception:
+        return none_result("error")
+
+
 # ------------------------------------------------------------------ 设置
 
 
@@ -711,6 +885,8 @@ class SettingsPatch(BaseModel):
     prefer_lossless: bool | None = None
     volume: float | None = None
     autoplay_next: bool | None = None
+    lyrics_online: bool | None = None
+    lyrics_bili: bool | None = None
     hidden_folders: list[int] | None = None
     theme: Literal["ink", "paper", "cream"] | None = None
 
@@ -734,6 +910,10 @@ async def api_set_settings(patch: SettingsPatch) -> dict[str, Any]:
         settings.volume = patch.volume
     if patch.autoplay_next is not None:
         settings.autoplay_next = patch.autoplay_next
+    if patch.lyrics_online is not None:
+        settings.lyrics_online = patch.lyrics_online
+    if patch.lyrics_bili is not None:
+        settings.lyrics_bili = patch.lyrics_bili
     if patch.hidden_folders is not None:
         settings.hidden_folders = patch.hidden_folders
     if patch.theme is not None:
