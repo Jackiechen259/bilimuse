@@ -220,7 +220,7 @@ bilimuse/
 │   │   ├── data/       # WBI 签名、B 站 API、登录态、演示 CDN、自动更新
 │   │   ├── player/     # MediaLibraryService / MediaController / DataSource
 │   │   └── ui/         # Compose 界面
-│   └── app/src/test/   # 100 个 JVM 测试
+│   └── app/src/test/   # 114 个 JVM 测试
 ├── scripts/            # 基准脚本 + 边车打包 / 图标生成
 ├── tests/              # 测试：引擎正确性、限速场景提速、断流恢复、Range、启动器、歌词
 └── docs/               # ARCHITECTURE.md / DESKTOP.md / PLAYBACK.md / ANDROID.md / LYRICS.md
@@ -250,11 +250,13 @@ bilimuse/
 ## 测试
 
 ```bash
-.venv/bin/python -m pytest -q      # 137 passed
+.venv/bin/python -m pytest -q      # 156 passed（共收集 157 个用例）
 ```
 
-本轮歌词功能新增 91 个 Python 用例。本地 Windows 上 `test_launcher.py::test_port_conflict_raises`
-与 `tests/test_btr.py` 里两个计时断言会偶发失败，属既有平台 / 时序问题，与歌词无关。
+本轮歌词功能新增 94 个 Python 用例，独立审查后又补充 17 个回归用例（共 111 个，全部通过，见
+`tests/test_lyrics.py` / `tests/test_lyrics_api.py`）。本机 Windows 上除既有的
+`test_launcher.py::test_port_conflict_raises`（`SO_REUSEADDR` 的平台语义差异，与歌词无关）外，
+机器负载高时 `tests/test_btr.py` 的计时断言也会偶发失败（单独重跑通过）。
 
 桌面登录桥（回环 HTTP 解析 / chunked / cookie 域过滤）另有 7 个 Rust 单元测试：
 
@@ -262,7 +264,7 @@ bilimuse/
 cd desktop/src-tauri && cargo test --release login
 ```
 
-安卓版的引擎、WBI 签名、演示 CDN、音轨选择、Android Auto 媒体 ID、自动更新、播放队列展示、随机顺序展开和歌词解析与匹配另有 100 个纯 JVM 测试（不需要模拟器）：
+安卓版的引擎、WBI 签名、演示 CDN、音轨选择、Android Auto 媒体 ID、自动更新、播放队列展示、随机顺序展开和歌词解析与匹配另有 114 个纯 JVM 测试（不需要模拟器）：
 
 ```bash
 cd android && ./gradlew :app:testDebugUnitTest

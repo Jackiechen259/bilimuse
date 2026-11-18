@@ -95,7 +95,10 @@ object LyricsLrc {
 
         // 有任何时间标签就按同步歌词处理；否则整段视为静态歌词。
         if (timed.isEmpty()) {
-            val lines = trimBlankEdges(staticLines.map { LyricsLine(0L, it) })
+            val lines = trimBlankEdges(
+                staticLines.map { LyricsLine(0L, it) },
+                collapseRuns = true,
+            )
             return ParseResult(
                 synced = false,
                 lines = lines.take(MAX_LINES),

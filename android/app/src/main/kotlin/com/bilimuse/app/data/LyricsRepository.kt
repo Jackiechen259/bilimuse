@@ -23,6 +23,9 @@ import okhttp3.Request
 import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToLong
@@ -101,7 +104,7 @@ class LyricsRepository(
     ): List<LyricsSourceOption> {
         if (!VALID_BVID.matches(bvid)) return emptyList()
         val settings = settingsProvider()
-        val demo = bvid.startsWith(DEMO_PREFIX)
+        val demo = isDemoBvid(bvid)
         val probe = Probe(bvid)
         val items = ArrayList<LyricsSourceOption>(4)
 
@@ -135,7 +138,8 @@ class LyricsRepository(
             label = when (biliKind) {
                 "ai" -> LABEL_BILI_AI
                 "manual" -> LABEL_BILI_MANUAL
-                else -> LABEL_BILI_MANUAL
+                // 不可用时给中性标签：不能谎称「人工」字幕。
+                else -> LABEL_BILI
             },
             kind = biliKind,
         )
@@ -231,8 +235,7 @@ class LyricsRepository(
         if (parsed.lines.isEmpty()) return null
         return lockFor(bvid).withLock {
             withContext(Dispatchers.IO) {
-                configDir.mkdirs()
-                localFile(bvid).writeText(decoded, Charsets.UTF_8)
+                writeFileAtomically(localFile(bvid), decoded)
                 // 本地文件优先，同时清掉旧缓存，避免删除本地后读到过期的抓取结果。
                 cacheFile(bvid).delete()
             }
@@ -314,12 +317,13 @@ class LyricsRepository(
         }
 
         // 演示曲目没有本地文件时给演示歌词，且不联网。
-        if (bvid.startsWith(DEMO_PREFIX)) return demoResult(prefs.offsetMs)
+        if (isDemoBvid(bvid)) return demoResult(prefs.offsetMs)
 
         val settings = settingsProvider()
 
         // 缓存只存抓取结果；偏移始终以当前偏好的最新值为准，避免调完偏移又跳回旧值。
-        if (!refresh) {
+        // 有 pin 时绝不读缓存：否则上一次自动阶梯的命中会遮蔽用户锁定的来源。
+        if (!refresh && prefs.pinSource == null) {
             readCache(bvid)
                 ?.takeIf { isCacheUsable(it, settings) }
                 ?.let { cached -> return cached.copy(offsetMs = prefs.offsetMs) }
@@ -330,13 +334,13 @@ class LyricsRepository(
         // 2. 用户锁定的来源（pin）。
         if (prefs.pinSource != null) {
             resolvePinned(bvid, prefs, upper, durationSec, settings, probe)?.let { pinned ->
-                return saveCache(bvid, pinned)
+                return cacheResult(bvid, prefs, pinned)
             }
         }
 
         // 3. B 站人工字幕（lan 不以 ai- 开头）。
         if (settings.lyricsBili) {
-            biliResult(probe, prefs, ai = false)?.let { return saveCache(bvid, it) }
+            biliResult(probe, prefs, ai = false)?.let { return cacheResult(bvid, prefs, it) }
         }
 
         // 4. LRCLIB：得分达标才用。
@@ -345,8 +349,9 @@ class LyricsRepository(
             if (found != null) {
                 val (record, _) = found
                 lrclibResult(record, prefs.offsetMs)?.let { result ->
-                    return saveCache(
+                    return cacheResult(
                         bvid,
+                        prefs,
                         result.copy(
                             meta = result.meta.copy(
                                 available = LyricsAvailable(
@@ -363,7 +368,7 @@ class LyricsRepository(
 
         // 5. B 站 AI 字幕（过滤占位内容后至少 4 行有效文本）。
         if (settings.lyricsBili) {
-            biliResult(probe, prefs, ai = true)?.let { return saveCache(bvid, it) }
+            biliResult(probe, prefs, ai = true)?.let { return cacheResult(bvid, prefs, it) }
         }
 
         // 6. none：按失败原因分类，交给界面显示不同空状态。
@@ -381,8 +386,23 @@ class LyricsRepository(
         ) {
             none
         } else {
-            saveCache(bvid, none)
+            cacheResult(bvid, prefs, none)
         }
+    }
+
+    /**
+     * 写入抓取缓存，但**有 pin 时只缓存锁定来源的命中**。
+     *
+     * 用户锁定了某个来源却临时降级成别的内容时，绝不能把这个降级结果写进缓存，
+     * 否则下次解析会一直吃缓存、永远不再尝试 pin。
+     */
+    private suspend fun cacheResult(
+        bvid: String,
+        prefs: LyricsPrefs,
+        result: LyricsResult,
+    ): LyricsResult {
+        if (prefs.pinSource != null && result.source != prefs.pinSource) return result
+        return saveCache(bvid, result)
     }
 
     /** pin 命中时按锁定来源解析；来源被设置关闭或本就不存在时返回 null 继续降级。 */
@@ -481,7 +501,10 @@ class LyricsRepository(
 
         for (query in queries) {
             val params = linkedMapOf("track_name" to query.track)
-            if (query.artist.isNotBlank()) params["artist_name"] = query.artist
+            // 只有标题里解析出的歌手才当 artist_name；UP 主名只参与打分与搜索提示。
+            if (query.artist.isNotBlank() && query.artistFromTitle) {
+                params["artist_name"] = query.artist
+            }
             attempt(params)?.let { return it }
         }
         val cleanedTitle = LyricsMatch.cleanTitle(title)
@@ -617,48 +640,48 @@ class LyricsRepository(
         val segments = ArrayList<SubtitleSegment>(elements.size)
         for (element in elements) {
             val item = element.asObjectOrNull() ?: continue
-            val text = item["content"].asStringOrNull()?.trim().orEmpty()
-            if (text.isEmpty() || PLACEHOLDER_LINE.matches(text)) continue
+            val raw = item["content"].asStringOrNull()?.trim().orEmpty()
+            if (raw.isEmpty() || PLACEHOLDER_LINE.matches(raw)) continue
+            // AI 字幕里 ♪ ♫ ♬ ♩ 只是「整句唱词」的分段标记：显示前去掉，压缩多余空白。
+            val text = if (ai) stripMusicMarks(raw) else raw
+            if (text.isEmpty()) continue
+            val standalone = ai && raw.any { it in MUSIC_MARKS }
             val fromMs = secondsToMillis(item["from"]) ?: continue
             val toMs = secondsToMillis(item["to"]) ?: fromMs
-            segments += SubtitleSegment(fromMs, toMs, text)
+            segments += SubtitleSegment(fromMs, toMs, text, standalone)
         }
         if (!ai) {
             return segments.sortedBy { it.fromMs }.map { LyricsLine(it.fromMs, it.text) }
         }
         // AI 字幕是句子级碎片：间隔 ≤0.3s、合并后 ≤24 字、总跨度 ≤8s 时并成一行。
+        // 带 ♪ 标记的段本身是完整唱词，独立成行，不与相邻碎片合并。
         val merged = ArrayList<LyricsLine>(segments.size)
-        var currentText = ""
-        var currentStart = 0L
-        var currentEnd = 0L
-        fun flush() {
-            if (currentText.isNotEmpty()) merged += LyricsLine(currentStart, currentText)
-            currentText = ""
-        }
+        var current: SubtitleSegment? = null
         for (segment in segments) {
-            if (currentText.isEmpty()) {
-                currentText = segment.text
-                currentStart = segment.fromMs
-                currentEnd = segment.toMs
-                continue
-            }
-            val gap = segment.fromMs - currentEnd
-            val joinedLength = currentText.length + segment.text.length
-            val span = segment.toMs - currentStart
-            if (gap <= AI_MERGE_GAP_MS && joinedLength <= AI_MERGE_MAX_CHARS &&
-                span <= AI_MERGE_MAX_SPAN_MS
+            val previous = current
+            if (previous != null && !previous.standalone && !segment.standalone &&
+                segment.fromMs - previous.toMs <= AI_MERGE_GAP_MS &&
+                previous.text.length + segment.text.length <= AI_MERGE_MAX_CHARS &&
+                maxOf(previous.toMs, segment.toMs) - previous.fromMs <= AI_MERGE_MAX_SPAN_MS
             ) {
-                currentText += segment.text
-                currentEnd = segment.toMs
+                current = previous.copy(
+                    toMs = maxOf(previous.toMs, segment.toMs),
+                    text = previous.text + segment.text,
+                )
             } else {
-                flush()
-                currentText = segment.text
-                currentStart = segment.fromMs
-                currentEnd = segment.toMs
+                if (previous != null) merged += LyricsLine(previous.fromMs, previous.text)
+                current = segment
             }
         }
-        flush()
-        return merged
+        current?.let { merged += LyricsLine(it.fromMs, it.text) }
+        return merged.sortedBy { it.timeMs }
+    }
+
+    /** 去掉 AI 字幕的 ♪ 标记并把因此产生的多余空白压成一个空格。 */
+    private fun stripMusicMarks(text: String): String {
+        var result = text
+        for (mark in MUSIC_MARKS) result = result.replace(mark.toString(), " ")
+        return result.replace(WHITESPACE, " ").trim()
     }
 
     private fun secondsToMillis(element: JsonElement?): Long? {
@@ -718,7 +741,10 @@ class LyricsRepository(
                 error = true
                 return null
             }
-            if (lines.size < MIN_BILI_LINES) return null
+            if (lines.isEmpty()) return null
+            // 「至少 4 行」只约束 AI 转写（碎片合并后仍太少说明没有歌词）；
+            // 人工字幕是 UP 主逐句录入的，1 行也必须能用。
+            if (ai && lines.size < MIN_AI_LINES) return null
             biliKind = if (ai) "ai" else "manual"
             return lines
         }
@@ -753,10 +779,9 @@ class LyricsRepository(
 
     private fun writePrefs(bvid: String, prefs: LyricsPrefs) {
         runCatching {
-            configDir.mkdirs()
-            prefsFile(bvid).writeText(
+            writeFileAtomically(
+                prefsFile(bvid),
                 json.encodeToString(LyricsPrefs.serializer(), prefs),
-                Charsets.UTF_8,
             )
         }
     }
@@ -785,17 +810,52 @@ class LyricsRepository(
         )
         withContext(Dispatchers.IO) {
             runCatching {
-                cacheDir.mkdirs()
-                cacheFile(bvid).writeText(
+                writeFileAtomically(
+                    cacheFile(bvid),
                     json.encodeToString(LyricsCacheFile.serializer(), envelope),
-                    Charsets.UTF_8,
                 )
             }
         }
         return result
     }
 
-    private fun lockFor(bvid: String): Mutex = locks.computeIfAbsent(bvid) { Mutex() }
+    /**
+     * 原子写：先写 `*.tmp` 再 replace，避免进程被杀 / 写一半时留下半截文件。
+     *
+     * 与 Python 的 tmp + `os.replace` 对齐；失败时删除 tmp，不影响已有文件。
+     */
+    private fun writeFileAtomically(file: File, text: String) {
+        val dir = file.parentFile
+        dir?.mkdirs()
+        val tmp = File(dir, "${file.name}.tmp")
+        try {
+            tmp.writeText(text, Charsets.UTF_8)
+            try {
+                Files.move(
+                    tmp.toPath(),
+                    file.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE,
+                )
+            } catch (e: AtomicMoveNotSupportedException) {
+                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+        } catch (e: Exception) {
+            tmp.delete()
+            throw e
+        }
+    }
+
+    /**
+     * 同一 bvid 的解析锁；数量超过 [MAX_LOCKS] 且锁当前空闲时清理，
+     * 避免长时间使用后按 bvid 无界增长。
+     */
+    private fun lockFor(bvid: String): Mutex {
+        if (locks.size > MAX_LOCKS) {
+            locks.entries.removeAll { !it.value.isLocked }
+        }
+        return locks.computeIfAbsent(bvid) { Mutex() }
+    }
 
     /** 设置关闭后对应来源直接跳过：缓存里来自该来源的结果也不再用。 */
     private fun isCacheUsable(result: LyricsResult, settings: EngineSettings): Boolean =
@@ -815,7 +875,13 @@ class LyricsRepository(
         class Failed : Fetch
     }
 
-    private data class SubtitleSegment(val fromMs: Long, val toMs: Long, val text: String)
+    private data class SubtitleSegment(
+        val fromMs: Long,
+        val toMs: Long,
+        val text: String,
+        /** AI 字幕里带 ♪ 等标记的段：本身是完整唱词，独立成行不参与合并。 */
+        val standalone: Boolean = false,
+    )
 
     private data class LrclibRecord(
         val id: Long,
@@ -859,6 +925,9 @@ class LyricsRepository(
         /** 演示模式 bvid 前缀（DEMO0001 / DEMO0002 / DEMO0003）。 */
         const val DEMO_PREFIX = "DEMO"
 
+        /** 演示曲目：不联网、不搜索在线歌词。 */
+        fun isDemoBvid(bvid: String): Boolean = bvid.startsWith(DEMO_PREFIX)
+
         const val SOURCE_LOCAL = "local"
         const val SOURCE_BILI = "bili"
         const val SOURCE_LRCLIB = "lrclib"
@@ -869,6 +938,7 @@ class LyricsRepository(
             setOf(SOURCE_LOCAL, SOURCE_BILI, SOURCE_LRCLIB, SOURCE_DEMO)
 
         const val LABEL_LOCAL = "本地歌词"
+        const val LABEL_BILI = "B 站字幕"
         const val LABEL_BILI_MANUAL = "B 站字幕（人工）"
         const val LABEL_BILI_AI = "B 站字幕（AI 转写）"
         const val LABEL_LRCLIB = "LRCLIB"
@@ -897,10 +967,17 @@ private const val CACHE_VERSION = 1
 private const val PREFS_VERSION = 1
 private const val OK_CACHE_TTL_MS = 30L * 24 * 60 * 60 * 1000
 private const val NONE_CACHE_TTL_MS = 6L * 60 * 60 * 1000
-private const val MIN_BILI_LINES = 4
+private const val MIN_AI_LINES = 4
+private const val MAX_LOCKS = 256
 private const val AI_MERGE_GAP_MS = 300L
 private const val AI_MERGE_MAX_CHARS = 24
 private const val AI_MERGE_MAX_SPAN_MS = 8_000L
+
+/** AI 字幕里标记「整句唱词」边界的音符；显示前去掉。 */
+private val MUSIC_MARKS = charArrayOf('♪', '♫', '♬', '♩')
+
+/** 空白压缩（AI 字幕去标记后可能留下多余空格）。 */
+private val WHITESPACE = Regex("""\s+""")
 
 /** 占位内容：`♪ 音乐 ♪` 之类，没有实际歌词。 */
 private val PLACEHOLDER_LINE = Regex("""^[♪♫\s]*音乐?[♪♫\s]*$""")

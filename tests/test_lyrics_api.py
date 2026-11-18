@@ -13,7 +13,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bilimuse import config, lyrics, server
-from bilimuse.api import BiliClient, BiliError
+from bilimuse.api import (
+    SUBTITLE_MAX_BYTES,
+    BiliClient,
+    BiliError,
+    subtitle_url,
+)
 from bilimuse.auth import Session
 
 BV = "BV1xx411c7mD"
@@ -417,7 +422,11 @@ def test_sources_show_manual_subtitles(api, monkeypatch):
     assert by_source["bili"]["kind"] == "manual"
     assert by_source["bili"]["label"] == "B 站字幕（人工）"
     assert by_source["lrclib"]["available"] is True
-    assert by_source["lrclib"]["matched"] == {"track": "夜航星", "artist": "不才"}
+    assert by_source["lrclib"]["matched"] == {
+        "id": 31664182,
+        "track": "夜航星",
+        "artist": "不才",
+    }
 
 
 def test_sources_survive_errors(api, monkeypatch):
@@ -602,3 +611,88 @@ def test_settings_lyrics_flags(monkeypatch):
         state = client.get("/api/state").json()["settings"]
         assert state["lyrics_online"] is False
         assert state["lyrics_bili"] is False
+
+
+# ---------------------------------------------------------------- 字幕地址 / 响应上限
+
+
+def test_subtitle_url_rebuilds_from_parsed_parts():
+    # 返回的是用解析结果重建的 URL：host 归一化、丢弃 userinfo / 端口 / fragment
+    assert (
+        subtitle_url("https://AISUBTITLE.HDSLB.COM:443/a.json?x=1#frag")
+        == "https://aisubtitle.hdslb.com/a.json?x=1"
+    )
+    assert (
+        subtitle_url("//aisubtitle.hdslb.com/b.json")
+        == "https://aisubtitle.hdslb.com/b.json"
+    )
+    assert (
+        subtitle_url("/x/subtitle.json")
+        == "https://www.bilibili.com/x/subtitle.json"
+    )
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "https://user:pass@aisubtitle.hdslb.com/x.json",
+        "https://aisubtitle.hdslb.com@evil.example.com/x.json",
+        "https://aisubtitle.hdslb.com\\evil.example.com/x.json",
+        "https://ａｉｓｕｂｔｉｔｌｅ.hdslb.com/x.json",
+    ],
+)
+def test_subtitle_url_rejects_userinfo_and_weird_hosts(bad):
+    with pytest.raises(BiliError):
+        subtitle_url(bad)
+
+
+async def test_subtitle_body_rejects_redirect_to_other_host():
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(
+            302, headers={"Location": "https://evil.example.com/subtitle.json"}
+        )
+
+    client = BiliClient(Session())
+    await client.http.aclose()
+    # 共享 client 跟随重定向；字幕下载必须单独关掉
+    client.http = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), follow_redirects=True
+    )
+    try:
+        with pytest.raises(BiliError):
+            await client.subtitle_body("https://aisubtitle.hdslb.com/a.json")
+    finally:
+        await client.close()
+    assert len(seen) == 1
+    assert "evil.example.com" not in seen[0]
+
+
+async def test_subtitle_body_rejects_oversized_body():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"x" * (SUBTITLE_MAX_BYTES + 1))
+
+    client = BiliClient(Session())
+    await client.http.aclose()
+    client.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(BiliError):
+            await client.subtitle_body("https://aisubtitle.hdslb.com/a.json")
+    finally:
+        await client.close()
+
+
+def test_resolve_meta_reports_pin(api, monkeypatch):
+    api.client.post(
+        f"/api/lyrics/{BV}/prefs", json={"pin_source": "lrclib", "pin_id": 777}
+    )
+
+    async def fake_record(lrclib_id):
+        return record(id=777)
+
+    monkeypatch.setattr(api.svc, "_fetch_record", fake_record)
+    data = api.client.get(f"/api/lyrics/{BV}").json()
+    assert data["status"] == "ok"
+    assert data["meta"]["pin"] == {"source": "lrclib", "id": 777}

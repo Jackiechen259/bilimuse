@@ -36,6 +36,8 @@ MAX_LRC_BYTES = 256 * 1024
 MAX_LRC_LINES = 2000
 MAX_SEARCH_RESULTS = 10
 MIN_AI_LINES = 4
+# 远端响应体积上限（LRCLIB / B 站字幕）：4 MB，防止异常响应占满内存
+MAX_REMOTE_BYTES = 4 * 1024 * 1024
 
 CACHE_VERSION = 1
 CACHE_TTL = 30 * 24 * 3600  # 命中缓存 30 天
@@ -211,6 +213,15 @@ def _ok_result(
     }
 
 
+def _with_pin(result: dict[str, Any], prefs: dict[str, Any]) -> dict[str, Any]:
+    """把当前的 pin 写进 meta；ok / none / 缓存命中都要带，前端据此展示锁定来源。"""
+    pin = prefs.get("pin")
+    meta = dict(result.get("meta") or {})
+    meta["pin"] = dict(pin) if isinstance(pin, dict) else None
+    result["meta"] = meta
+    return result
+
+
 # ---------------------------------------------------------------- LRC 解析
 
 
@@ -232,23 +243,30 @@ def _tag_seconds(match: re.Match[str]) -> float:
     return minutes * 60 + seconds + millis
 
 
-def _trim_blank_lines(lines: list[LyricLine]) -> list[LyricLine]:
-    """裁掉首尾空行，中间连续空行最多保留 2 个（参与滚动）。"""
-    kept: list[LyricLine] = []
+def _blank_kept_indexes(texts: list[str]) -> list[int]:
+    """保留文本索引：中间连续空行最多 2 个，首尾空行全部裁掉。"""
+    kept: list[int] = []
     blank_run = 0
-    for line in lines:
-        if line.text:
+    for index, text in enumerate(texts):
+        if text:
             blank_run = 0
-            kept.append(line)
+            kept.append(index)
         else:
             blank_run += 1
             if blank_run <= 2:
-                kept.append(line)
-    while kept and not kept[0].text:
+                kept.append(index)
+    while kept and not texts[kept[0]]:
         kept.pop(0)
-    while kept and not kept[-1].text:
+    while kept and not texts[kept[-1]]:
         kept.pop()
     return kept
+
+
+def _trim_blank_lines(lines: list[LyricLine]) -> list[LyricLine]:
+    """裁掉首尾空行，中间连续空行最多保留 2 个（参与滚动）。"""
+    return [
+        lines[index] for index in _blank_kept_indexes([line.text for line in lines])
+    ]
 
 
 def parse_lrc_text(text: str) -> tuple[list[LyricLine], bool]:
@@ -269,7 +287,11 @@ def parse_lrc_text(text: str) -> tuple[list[LyricLine], bool]:
     plain: list[str] = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
-        if not line or line.startswith("#"):
+        if not line:
+            # 保留空行（同步歌词里空行参与滚动；纯文本歌词同样按行展示）
+            plain.append("")
+            continue
+        if line.startswith("#"):
             continue
         matches = list(TIME_TAG_RE.finditer(line))
         if matches:
@@ -283,7 +305,8 @@ def parse_lrc_text(text: str) -> tuple[list[LyricLine], bool]:
 
     if not timed:
         # 没有任何时间标签：静态歌词，按行原样展示（t 只是序号占位）
-        return [LyricLine(float(index), lyric) for index, lyric in enumerate(plain)], False
+        kept = [plain[index] for index in _blank_kept_indexes(plain)]
+        return [LyricLine(float(index), lyric) for index, lyric in enumerate(kept)], False
 
     seen: set[tuple[float, str]] = set()
     lines: list[LyricLine] = []
@@ -472,17 +495,8 @@ def pick_match(
             track_part = similarity(record.get("trackName"), track)
             if track_part < TRACK_THRESHOLD:
                 continue
-            artist_part = 0.0
-            for name in (artist, upper):
-                if str(name or "").strip():
-                    artist_part = max(
-                        artist_part, artist_score(name, record.get("artistName"))
-                    )
-            score = (
-                track_part * 0.6
-                + artist_part * 0.2
-                + duration_score(record.get("duration"), video_duration) * 0.2
-            )
+            # 打分只保留一份实现：pick_match 直接复用 score_record
+            score = score_record(record, track, artist, upper, video_duration)
             if score < MATCH_THRESHOLD:
                 continue
             diff = _duration_diff(record.get("duration"), video_duration)
@@ -682,6 +696,18 @@ class LyricsService:
         except OSError:
             return False
 
+    def _lock_for(self, bvid: str) -> asyncio.Lock:
+        """取（或创建）按 bvid 的解析锁；表太大时顺手清掉已释放的旧锁。"""
+        if len(self._locks) > 256:
+            for key, lock in list(self._locks.items()):
+                if key != bvid and not lock.locked():
+                    self._locks.pop(key, None)
+        lock = self._locks.get(bvid)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[bvid] = lock
+        return lock
+
     # ------------------------------------------------------------ 偏好
 
     @staticmethod
@@ -797,6 +823,12 @@ class LyricsService:
         result = raw.get("result")
         if not isinstance(result, dict) or result.get("status") not in {"ok", "none"}:
             return None
+        if result.get("status") == "none" and str(result.get("reason") or "") in {
+            "disabled",
+            "not_logged_in",
+        }:
+            # 旧版本可能留下这类缓存；开关 / 登录态已经变了，直接丢弃
+            return None
         source = str(result.get("source") or "")
         if result["status"] == "ok":
             if source not in {"lrclib", "bili"}:
@@ -811,6 +843,16 @@ class LyricsService:
         self, bvid: str, result: dict[str, Any], prefs: dict[str, Any]
     ) -> None:
         source = str(result.get("source") or "")
+        pin = prefs.get("pin")
+        if isinstance(pin, dict) and source != str(pin.get("source") or ""):
+            # 有 pin 时只缓存真正命中 pin 的结果；降级结果不能被缓存遮蔽
+            return
+        if result.get("status") == "none" and str(result.get("reason") or "") in {
+            "disabled",
+            "not_logged_in",
+        }:
+            # 来源开关 / 登录态是可变的：这类空结果缓存后用户改设置也看不到新结果
+            return
         if result.get("status") == "ok" and source not in {"lrclib", "bili"}:
             return
         ttl = CACHE_TTL if result.get("status") == "ok" else MISS_TTL
@@ -850,6 +892,8 @@ class LyricsService:
         if response.status_code == 404:
             return []
         response.raise_for_status()
+        if len(response.content) > MAX_REMOTE_BYTES:
+            raise LyricsError("LRCLIB 返回内容过大")
         try:
             data = response.json()
         except ValueError as exc:
@@ -865,6 +909,8 @@ class LyricsService:
         if response.status_code == 404:
             return None
         response.raise_for_status()
+        if len(response.content) > MAX_REMOTE_BYTES:
+            raise LyricsError("LRCLIB 返回内容过大")
         try:
             data = response.json()
         except ValueError as exc:
@@ -964,27 +1010,29 @@ class LyricsService:
             local = self._load_local(bvid)
             if local is not None:
                 lines, synced = local
-                return _ok_result(
-                    "local",
-                    "",
-                    lines,
-                    synced,
-                    offset=prefs["offset"],
-                    available={"local": True, "bili": False, "lrclib": False},
+                return _with_pin(
+                    _ok_result(
+                        "local",
+                        "",
+                        lines,
+                        synced,
+                        offset=prefs["offset"],
+                        available={"local": True, "bili": False, "lrclib": False},
+                    ),
+                    prefs,
                 )
-            return _ok_result(
-                "demo",
-                "",
-                demo_lines(),
-                True,
-                offset=prefs["offset"],
-                available=_empty_available(),
+            return _with_pin(
+                _ok_result(
+                    "demo",
+                    "",
+                    demo_lines(),
+                    True,
+                    offset=prefs["offset"],
+                    available=_empty_available(),
+                ),
+                prefs,
             )
-        lock = self._locks.get(bvid)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._locks[bvid] = lock
-        async with lock:
+        async with self._lock_for(bvid):
             return await self._resolve_locked(
                 bvid, str(title or ""), str(upper or ""), _as_float(duration), bool(refresh)
             )
@@ -1001,27 +1049,35 @@ class LyricsService:
         local = self._load_local(bvid)
         if local is not None:
             lines, synced = local
-            return _ok_result(
-                "local",
-                "",
-                lines,
-                synced,
-                offset=prefs["offset"],
-                available={"local": True, "bili": False, "lrclib": False},
+            return _with_pin(
+                _ok_result(
+                    "local",
+                    "",
+                    lines,
+                    synced,
+                    offset=prefs["offset"],
+                    available={"local": True, "bili": False, "lrclib": False},
+                ),
+                prefs,
             )
 
-        if not refresh:
+        # 有 pin 时跳过缓存读取：pin 源可能只是瞬时失败，不能被降级缓存挡住重试
+        if not refresh and not prefs.get("pin"):
             cached = self._read_cache(bvid, prefs)
             if cached is not None:
-                return {
-                    **cached,
-                    "offset": prefs["offset"],
-                    "lines": [dict(line) for line in cached.get("lines") or []],
-                    "meta": {**(cached.get("meta") or {}), "cached": True},
-                }
+                return _with_pin(
+                    {
+                        **cached,
+                        "offset": prefs["offset"],
+                        "lines": [dict(line) for line in cached.get("lines") or []],
+                        "meta": {**(cached.get("meta") or {}), "cached": True},
+                    },
+                    prefs,
+                )
 
         result = await self._ladder(bvid, title, upper, duration, prefs)
         result["offset"] = prefs["offset"]
+        _with_pin(result, prefs)
         self._write_cache(bvid, result, prefs)
         return result
 
@@ -1186,7 +1242,8 @@ class LyricsService:
             reason = "timeout"
         elif saw_error:
             reason = "error"
-        elif bili_enabled and not logged_in and not online:
+        elif bili_enabled and not logged_in:
+            # B 站字幕开着但没登录：与安卓一致，即使在线源开着但没匹配到也提示登录
             reason = "not_logged_in"
         else:
             reason = "not_found"
@@ -1276,6 +1333,7 @@ class LyricsService:
                     "available": True,
                     "label": "LRCLIB",
                     "matched": {
+                        "id": int(_as_float(record.get("id"))),
                         "track": str(record.get("trackName") or ""),
                         "artist": str(record.get("artistName") or ""),
                     },
@@ -1336,11 +1394,7 @@ class LyricsService:
         if not record:
             return none_result("not_found")
 
-        lock = self._locks.get(bvid)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._locks[bvid] = lock
-        async with lock:
+        async with self._lock_for(bvid):
             prefs = self._read_prefs(bvid)
             result = self._lrclib_result(record, _empty_available())
             if result is None:
@@ -1351,6 +1405,7 @@ class LyricsService:
             }
             self._write_prefs(bvid, prefs)
             result["offset"] = prefs["offset"]
+            _with_pin(result, prefs)
             self._write_cache(bvid, result, prefs)
             return result
 

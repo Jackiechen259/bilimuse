@@ -1039,6 +1039,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** LRCLIB 歌词搜索（最多 10 条）；关闭在线来源时仓库直接返回空列表。 */
     suspend fun searchLyrics(query: String): List<LyricsCandidate> {
+        // 演示曲目的歌词是固定常量：不联网，也不允许被换成在线歌词。
+        if (LyricsRepository.isDemoBvid(playerState.value.bvid) || registry.demoMode) {
+            _messages.tryEmit("演示模式不搜索在线歌词")
+            return emptyList()
+        }
         val keyword = query.trim()
         if (keyword.isEmpty()) return emptyList()
         return try {

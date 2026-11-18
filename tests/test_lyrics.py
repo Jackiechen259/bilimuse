@@ -6,6 +6,7 @@ LRCLIB 打分、来源阶梯、缓存与偏好、隐私（LRCLIB 请求不带 Co
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 
@@ -212,8 +213,17 @@ def test_parse_static_lyrics_without_time_tags():
     text = "第一句\n\n第二句\n[ti:夜航星]\n[ar:不才]\n# 注释\n"
     lines, synced = lyrics.parse_lrc_text(text)
     assert synced is False
-    assert [line.text for line in lines] == ["第一句", "第二句"]
-    assert [line.t for line in lines] == [0.0, 1.0]
+    # 静态歌词同样保留空行（参与滚动），首尾裁掉、连续最多 2 个
+    assert [line.text for line in lines] == ["第一句", "", "第二句"]
+    assert [line.t for line in lines] == [0.0, 1.0, 2.0]
+
+
+def test_parse_static_lyrics_trims_and_caps_blank_runs():
+    text = "\n\n第一句\n\n\n\n第二句\n\n\n"
+    lines, synced = lyrics.parse_lrc_text(text)
+    assert synced is False
+    assert [line.text for line in lines] == ["第一句", "", "", "第二句"]
+    assert [line.t for line in lines] == [0.0, 1.0, 2.0, 3.0]
 
 
 def test_parse_ignores_metadata_lines():
@@ -432,6 +442,29 @@ def test_pick_match_prefers_closer_duration():
     assert matched is not None
     assert matched[0]["id"] == 2
     assert matched[1] == pytest.approx(0.98, abs=1e-6)
+
+
+def test_pick_match_delegates_to_score_record(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    def fake_score(record, track, artist="", upper="", video_duration=0):
+        calls.append((track, artist))
+        return 0.7
+
+    monkeypatch.setattr(lyrics, "score_record", fake_score)
+    matched = lyrics.pick_match([record()], [("夜航星", "不才")], "", 304)
+    assert calls == [("夜航星", "不才")]
+    assert matched is not None
+    assert matched[1] == pytest.approx(0.7)
+
+
+def test_pick_match_score_matches_score_record():
+    rec = record(trackName="夜航星 (Live)", artistName="不才", duration=340)
+    matched = lyrics.pick_match([rec], [("夜航星", "不才")], "", 304)
+    assert matched is not None
+    assert matched[1] == pytest.approx(
+        lyrics.score_record(rec, "夜航星", "不才", "", 304)
+    )
 
 
 # ---------------------------------------------------------------- 字幕转换
@@ -835,12 +868,16 @@ async def test_ok_cache_lives_thirty_days(service, monkeypatch):
 
 
 async def test_miss_cache_lives_six_hours(service, monkeypatch):
+    # 只测缓存策略：关掉 B 站字幕，避免落到 not_logged_in（那种空结果不缓存）
+    monkeypatch.setattr(config.settings, "lyrics_bili", False)
+
     async def empty(params):
         return []
 
     monkeypatch.setattr(service, "_fetch_search", empty)
     first = await service.resolve(BV, title="夜航星 - 不才", duration=304)
     assert first["status"] == "none"
+    assert first["reason"] == "not_found"
     raw = json.loads((service.cache_dir / f"{BV}.json").read_text(encoding="utf-8"))
     ttl = raw["expires"] - time.time()
     assert 5.9 * 3600 < ttl <= lyrics.MISS_TTL + 5
@@ -994,3 +1031,165 @@ async def test_search_is_empty_without_query_or_setting(service, monkeypatch):
     assert await service.search("  ") == []
     monkeypatch.setattr(config.settings, "lyrics_online", False)
     assert await service.search("夜航星") == []
+
+
+# ---------------------------------------------------------------- 缓存不遮蔽 pin / 设置
+
+
+async def test_disabled_none_result_is_not_cached(service, monkeypatch):
+    monkeypatch.setattr(config.settings, "lyrics_online", False)
+    monkeypatch.setattr(config.settings, "lyrics_bili", False)
+    first = await service.resolve(BV)
+    assert first["reason"] == "disabled"
+    # 关着开关时的 none 不能缓存，否则用户重新打开后 6 小时内都看不到歌词
+    assert not (service.cache_dir / f"{BV}.json").exists()
+
+    calls = {"n": 0}
+
+    async def fake_search(params):
+        calls["n"] += 1
+        return [record()]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    monkeypatch.setattr(config.settings, "lyrics_online", True)
+    second = await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    assert second["status"] == "ok"
+    assert second["source"] == "lrclib"
+    assert calls["n"] == 1
+
+
+async def test_not_logged_in_none_result_is_not_cached(service, monkeypatch):
+    service.bili = FakeBili(logged_in=False)
+    first = await service.resolve(BV)
+    assert first["reason"] == "not_logged_in"
+    assert not (service.cache_dir / f"{BV}.json").exists()
+
+    calls = {"n": 0}
+
+    async def fake_search(params):
+        calls["n"] += 1
+        return [record()]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    service.bili = None
+    second = await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    assert second["source"] == "lrclib"
+    assert calls["n"] == 1
+
+
+async def test_stale_disabled_cache_is_ignored(service, monkeypatch):
+    calls = {"n": 0}
+
+    async def fake_search(params):
+        calls["n"] += 1
+        return [record()]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    write_cache(
+        service,
+        BV,
+        {
+            "status": "none",
+            "source": "",
+            "source_label": "",
+            "synced": False,
+            "offset": 0.0,
+            "lines": [],
+            "meta": {"matched": None, "available": {}, "cached": False},
+            "reason": "disabled",
+        },
+    )
+    result = await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    assert result["source"] == "lrclib"
+    assert calls["n"] == 1
+
+
+async def test_pinned_source_skips_cache_and_retries_after_timeout(service, monkeypatch):
+    forbid_network(service, monkeypatch)
+    service.update_prefs(BV, pin_source="lrclib", pin_id=999)
+    calls = {"n": 0}
+
+    async def timeout(lrclib_id):
+        calls["n"] += 1
+        assert lrclib_id == 999
+        raise httpx.ReadTimeout("超时")
+
+    monkeypatch.setattr(service, "_fetch_record", timeout)
+    first = await service.resolve(BV)
+    assert first["status"] == "none"
+    assert calls["n"] == 1
+    # pin 降级结果不能写缓存，否则之后永远不会再试 pin
+    assert not (service.cache_dir / f"{BV}.json").exists()
+
+    second = await service.resolve(BV)
+    assert calls["n"] == 2
+    assert second["meta"]["pin"] == {"source": "lrclib", "id": 999}
+
+
+async def test_meta_pin_reports_locked_source(service, monkeypatch):
+    forbid_network(service, monkeypatch)
+    service.update_prefs(BV, pin_source="lrclib", pin_id=31664182)
+
+    async def fake_record(lrclib_id):
+        return record()
+
+    monkeypatch.setattr(service, "_fetch_record", fake_record)
+    result = await service.resolve(BV, duration=304)
+    assert result["status"] == "ok"
+    assert result["meta"]["pin"] == {"source": "lrclib", "id": 31664182}
+
+
+async def test_meta_pin_is_null_without_pin_even_when_cached(service, monkeypatch):
+    async def fake_search(params):
+        return [record()]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    first = await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    assert first["meta"]["pin"] is None
+    second = await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    assert second["meta"]["cached"] is True
+    assert second["meta"]["pin"] is None
+
+
+async def test_not_logged_in_reason_when_online_finds_nothing(service, monkeypatch):
+    service.bili = FakeBili(logged_in=False)
+
+    async def empty_search(params):
+        return []
+
+    monkeypatch.setattr(service, "_fetch_search", empty_search)
+    result = await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    assert result["status"] == "none"
+    assert result["reason"] == "not_logged_in"
+
+
+async def test_lrclib_response_size_is_capped(tmp_path):
+    huge = b"x" * (lyrics.MAX_REMOTE_BYTES + 1)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=huge)
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    service = lyrics.LyricsService(
+        bili=None,
+        http=http,
+        lyrics_dir=tmp_path / "lyrics",
+        cache_dir=tmp_path / "cache",
+    )
+    try:
+        with pytest.raises(lyrics.LyricsError):
+            await service._fetch_search({"q": "夜航星"})
+        with pytest.raises(lyrics.LyricsError):
+            await service._fetch_record(1)
+    finally:
+        await http.aclose()
+
+
+async def test_lock_table_is_pruned(service, monkeypatch):
+    monkeypatch.setattr(config.settings, "lyrics_online", False)
+    monkeypatch.setattr(config.settings, "lyrics_bili", False)
+    for index in range(300):
+        service._locks[f"BV{index:08d}"] = asyncio.Lock()
+    await service.resolve(BV)
+    assert len(service._locks) <= 257
+    assert BV in service._locks

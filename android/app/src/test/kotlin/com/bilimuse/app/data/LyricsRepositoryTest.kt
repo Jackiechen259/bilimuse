@@ -7,10 +7,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -139,6 +141,89 @@ class LyricsRepositoryTest {
         assertEquals(42L, pinned.meta.matched?.id)
         val paths = (1..server.requestCount).map { server.takeRequest().requestUrl!!.encodedPath }
         assertEquals(listOf("/api/get/42", "/api/get/42"), paths)
+    }
+
+    @Test
+    fun pinnedSourceIsNotMaskedByCachedResult() {
+        settings = EngineSettings(lyricsBili = false)
+        respond { json(JsonArray(listOf(recordJson()))) }
+        val repo = repository()
+
+        // 先走自动阶梯，缓存一份普通搜索命中的 LRCLIB 结果。
+        val cached = runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
+        assertEquals(31_664_182L, cached.meta.matched?.id)
+        drainPaths()
+
+        // 用户锁定另一条候选后，缓存不能遮蔽 pin：必须真的去取锁定的 id。
+        repo.setPin(bvid, LyricsRepository.SOURCE_LRCLIB, 42L)
+        respond { request ->
+            when (request.requestUrl!!.encodedPath) {
+                "/api/get/42" -> json(recordJson(id = 42L))
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+        val pinned = runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
+        assertEquals("ok", pinned.status)
+        assertEquals(42L, pinned.meta.matched?.id)
+        assertTrue("有 pin 时必须请求锁定的 id", drainPaths().contains("/api/get/42"))
+    }
+
+    @Test
+    fun pinnedLrclibTimeoutFallbackIsNotCachedAndRetries() {
+        val fastClient = LyricsRepository.defaultLrclibClient().newBuilder()
+            .connectTimeout(200, TimeUnit.MILLISECONDS)
+            .readTimeout(200, TimeUnit.MILLISECONDS)
+            .build()
+        val repo = repository(lrclibClient = fastClient)
+        val pinnedBvid = "BV1zz411c7mF"
+        repo.setPin(pinnedBvid, LyricsRepository.SOURCE_LRCLIB, 42L)
+
+        // 锁定的 id 超时：降级为 none，但绝不能把这个降级结果写进缓存。
+        respond { MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE) }
+        val failed = runBlocking { repo.resolve(pinnedBvid, "夜航星 - 不才", "不才", 304) }
+        assertEquals("none", failed.status)
+        assertTrue("超时降级", failed.reason in setOf("timeout", "error"))
+        assertFalse(
+            "pin 降级结果不能写缓存",
+            File(cacheDir, "$pinnedBvid.json").exists(),
+        )
+        drainPaths()
+
+        // 网络恢复后必须再次请求被锁定的 id，而不是吃降级缓存。
+        respond { request ->
+            when (request.requestUrl!!.encodedPath) {
+                "/api/get/42" -> json(recordJson(id = 42L))
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+        val retried = runBlocking { repo.resolve(pinnedBvid, "夜航星 - 不才", "不才", 304) }
+        assertEquals("ok", retried.status)
+        assertEquals(42L, retried.meta.matched?.id)
+        assertTrue("第二次 resolve 必须再次请求该 id", drainPaths().contains("/api/get/42"))
+    }
+
+    @Test
+    fun lrclibQueryNeverSendsUpperAsArtistName() {
+        settings = EngineSettings(lyricsBili = false)
+        respond { json(JsonArray(emptyList())) }
+        val repo = repository()
+        val result = runBlocking { repo.resolve(bvid, "孤勇者（Live版）", "陈奕迅", 304) }
+        assertEquals("none", result.status)
+        val requests = drainRequests()
+        assertTrue("至少发出一次 LRCLIB 查询", requests.isNotEmpty())
+        assertTrue(
+            "UP 主名不能当 artist_name 查询参数",
+            requests.all { it.requestUrl!!.queryParameter("artist_name") == null },
+        )
+        assertTrue(requests.any { it.requestUrl!!.queryParameter("track_name") == "孤勇者" })
+    }
+
+    @Test
+    fun demoBvidPredicateMatchesOnlyDemoTracks() {
+        assertTrue(LyricsRepository.isDemoBvid("DEMO0001"))
+        assertTrue(LyricsRepository.isDemoBvid("DEMO0003"))
+        assertFalse(LyricsRepository.isDemoBvid("BV1xx411c7mD"))
+        assertFalse(LyricsRepository.isDemoBvid(""))
     }
 
     // ------------------------------------------------------------ 本地与缓存
@@ -323,19 +408,90 @@ class LyricsRepositoryTest {
     }
 
     @Test
-    fun biliSubtitleWithFewerThanFourLinesFallsThrough() {
+    fun manualSubtitleWithSingleLineIsUsable() {
         settings = EngineSettings(lyricsOnline = false, lyricsBili = true)
+        fakeBili.loggedIn = true
         fakeBili.tracks = listOf(
             SubtitleTrack("zh-CN", "中文（中国）", "https://i0.hdslb.com/manual.json", false),
         )
+        fakeBili.body = subtitleJson(Triple(1.0, 2.0, "只有一行人工字幕"))
+        val result = runBlocking { repository().resolve(bvid, "夜航星", "不才", 304) }
+        assertEquals("ok", result.status)
+        assertEquals("bili", result.source)
+        assertEquals("B 站字幕（人工）", result.sourceLabel)
+        assertEquals(1, result.lines.size)
+        assertEquals("只有一行人工字幕", result.lines[0].text)
+    }
+
+    @Test
+    fun aiSubtitleWithFewerThanFourLinesFallsThrough() {
+        settings = EngineSettings(lyricsOnline = false, lyricsBili = true)
+        fakeBili.loggedIn = true
+        fakeBili.tracks = listOf(
+            SubtitleTrack("ai-zh", "中文（AI生成）", "https://i0.hdslb.com/ai.json", true),
+        )
         fakeBili.body = subtitleJson(
             Triple(1.0, 2.0, "只有"),
-            Triple(2.0, 3.0, "两行"),
+            Triple(3.0, 4.0, "三行"),
+            Triple(5.0, 6.0, "有效"),
         )
         val result = runBlocking { repository().resolve(bvid, "夜航星", "不才", 304) }
         assertEquals("none", result.status)
         assertEquals("not_found", result.reason)
         assertTrue(result.lines.isEmpty())
+    }
+
+    @Test
+    fun aiSubtitleStripsMusicMarksAndKeepsMarkedLinesStandalone() {
+        settings = EngineSettings(lyricsOnline = false, lyricsBili = true)
+        fakeBili.loggedIn = true
+        fakeBili.tracks = listOf(
+            SubtitleTrack("ai-zh", "中文（AI生成）", "https://i0.hdslb.com/ai.json", true),
+        )
+        fakeBili.body = subtitleJson(
+            Triple(1.0, 2.0, "♪ 第一句完整唱词 ♪"),
+            Triple(3.0, 4.0, "♫ 第二句完整唱词 ♫"),
+            Triple(5.0, 6.0, "♬ 第三句完整唱词 ♬"),
+            Triple(7.0, 8.0, "♩ 第四句完整唱词 ♩"),
+        )
+        val result = runBlocking { repository().resolve(bvid, "夜航星", "不才", 304) }
+        assertEquals("ok", result.status)
+        assertEquals("bili", result.source)
+        assertEquals(4, result.lines.size)
+        assertEquals(
+            listOf("第一句完整唱词", "第二句完整唱词", "第三句完整唱词", "第四句完整唱词"),
+            result.lines.map { it.text },
+        )
+        assertEquals(listOf(1_000L, 3_000L, 5_000L, 7_000L), result.lines.map { it.timeMs })
+        assertTrue("标记必须从显示文本里去掉", result.lines.none { line -> line.text.any { it in "♪♫♬♩" } })
+    }
+
+    @Test
+    fun aiSubtitleMergesOnlyUnmarkedFragments() {
+        settings = EngineSettings(lyricsOnline = false, lyricsBili = true)
+        fakeBili.loggedIn = true
+        fakeBili.tracks = listOf(
+            SubtitleTrack("ai-zh", "中文（AI生成）", "https://i0.hdslb.com/ai.json", true),
+        )
+        fakeBili.body = subtitleJson(
+            // 带标记的整句：独立成行，不能和下一句碎片合并。
+            Triple(1.0, 2.0, "♪ 第一句完整唱词 ♪"),
+            Triple(2.1, 2.5, "第二句"),
+            Triple(2.6, 3.0, "接着唱"),
+            // 带标记的整句夹在两段可合并碎片之间：前后都必须断开。
+            Triple(3.1, 4.0, "♪ 第三句完整唱词 ♪"),
+            Triple(4.1, 4.5, "第四句"),
+            Triple(4.6, 5.0, "片段"),
+            Triple(5.1, 6.0, "♪ 第五句完整唱词 ♪"),
+        )
+        val result = runBlocking { repository().resolve(bvid, "夜航星", "不才", 304) }
+        assertEquals("ok", result.status)
+        assertEquals(5, result.lines.size)
+        assertEquals(
+            listOf("第一句完整唱词", "第二句接着唱", "第三句完整唱词", "第四句片段", "第五句完整唱词"),
+            result.lines.map { it.text },
+        )
+        assertEquals(listOf(1_000L, 2_100L, 3_100L, 4_100L, 5_100L), result.lines.map { it.timeMs })
     }
 
     @Test
@@ -449,6 +605,28 @@ class LyricsRepositoryTest {
         assertFalse(items[3].available)
     }
 
+    @Test
+    fun sourcesUsesNeutralBiliLabelWhenUnavailable() {
+        // 演示曲目不探测 B 站字幕：不可用时应显示中性的「B 站字幕」，而不是「（人工）」。
+        val items = runBlocking { repository().sources(demoBvid, "", "", 45) }
+        val bili = items.first { it.source == "bili" }
+        assertFalse(bili.available)
+        assertEquals("", bili.kind)
+        assertEquals("B 站字幕", bili.label)
+    }
+
+    @Test
+    fun sourcesKeepsAiLabelWhenOnlyAiTrackExists() {
+        fakeBili.tracks = listOf(
+            SubtitleTrack("ai-zh", "中文（AI生成）", "https://i0.hdslb.com/ai.json", true),
+        )
+        val items = runBlocking { repository().sources(bvid, "夜航星", "不才", 304) }
+        val bili = items.first { it.source == "bili" }
+        assertTrue(bili.available)
+        assertEquals("ai", bili.kind)
+        assertEquals("B 站字幕（AI 转写）", bili.label)
+    }
+
     // ------------------------------------------------------------ BiliClient 字幕接口
 
     @Test
@@ -507,9 +685,21 @@ class LyricsRepositoryTest {
         assertNull(BiliClient.resolveSubtitleUrl("http://i0.hdslb.com/a.json"))
         assertNull(BiliClient.resolveSubtitleUrl("https://i0.hdslb.com.evil.com/a.json"))
         assertNull(BiliClient.resolveSubtitleUrl(""))
+        // 显式加固：userinfo / 反斜杠 / 非 ASCII host 一律拒绝。
+        assertNull(BiliClient.resolveSubtitleUrl("https://user:pass@i0.hdslb.com/a.json"))
+        assertNull(BiliClient.resolveSubtitleUrl("https://i0.hdslb.com@evil.com/a.json"))
+        assertNull(BiliClient.resolveSubtitleUrl("https://i0.hdslb.com\\@evil.com/a.json"))
+        assertNull(BiliClient.resolveSubtitleUrl("https://i0.hdslb.com\\a.json"))
+        assertNull("非 ASCII host（IDN 归一化后可伪装白名单域）", BiliClient.resolveSubtitleUrl("https://i0。hdslb.com/a.json"))
+        assertNull(BiliClient.resolveSubtitleUrl("https://i0.hdslb.com\u3002evil.com/a.json"))
+        // 合法地址用解析后的 scheme/host 重建，保留路径与 query。
         assertEquals(
             "https://i0.hdslb.com/a.json",
             BiliClient.resolveSubtitleUrl("//i0.hdslb.com/a.json"),
+        )
+        assertEquals(
+            "https://i0.hdslb.com/a.json?x=1",
+            BiliClient.resolveSubtitleUrl("https://i0.hdslb.com/a.json?x=1"),
         )
         assertEquals(
             "https://www.bilibili.com/x/subtitle.json",
@@ -532,6 +722,59 @@ class LyricsRepositoryTest {
             runBlocking { client.subtitleBody("https://evil.example.com/a.json") }
         }.exceptionOrNull()
         assertTrue("外域字幕地址必须直接拒绝", error is BiliException)
+    }
+
+    @Test
+    fun subtitleDownloadRejectsRedirectToMetadataEndpoint() {
+        server.enqueue(
+            MockResponse().setResponseCode(302)
+                .setHeader("Location", "http://169.254.169.254/latest/meta-data/"),
+        )
+        val client = BiliClient(MemorySessionSink())
+        val error = runCatching {
+            runBlocking { client.downloadSubtitle(server.url("/redir.json").toString()) }
+        }.exceptionOrNull()
+        assertTrue("字幕下载遇到 3xx 必须失败", error is BiliException)
+        assertEquals("不能跟随重定向", 1, server.requestCount)
+    }
+
+    @Test
+    fun subtitleDownloadRejectsOversizeBody() {
+        val oversized = "x".repeat(4 * 1024 * 1024 + 1)
+        server.enqueue(MockResponse().setBody(oversized))
+        val client = BiliClient(MemorySessionSink())
+        val error = runCatching {
+            runBlocking { client.downloadSubtitle(server.url("/big.json").toString()) }
+        }.exceptionOrNull()
+        assertTrue("超过 4 MB 的字幕必须拒绝", error is BiliException)
+    }
+
+    @Test
+    fun writesAreAtomicAndComplete() {
+        settings = EngineSettings(lyricsBili = false)
+        respond { json(JsonArray(listOf(recordJson()))) }
+        val repo = repository()
+
+        // 本地 LRC 与偏好：写完后内容完整可读。
+        val lrcText = "[00:01.00]第一行\n[00:02.00]第二行"
+        assertNotNull(runBlocking { repo.importLocal(bvid, lrcText) })
+        repo.setOffset(bvid, 1_500L)
+        val local = File(configDir, "$bvid.lrc")
+        assertEquals("本地 LRC 写入必须完整", lrcText, local.readText(Charsets.UTF_8))
+        val prefs = File(configDir, "$bvid.json")
+        assertTrue("偏好写入必须完整", prefs.readText(Charsets.UTF_8).contains("1500"))
+
+        // 抓取缓存：写到另一个 bvid，之后能原样读回。
+        val cachedBvid = "BV1yy411c7mE"
+        runBlocking { repo.resolve(cachedBvid, "夜航星 - 不才", "不才", 304) }
+        val cached = runBlocking { repo.resolve(cachedBvid, "夜航星 - 不才", "不才", 304) }
+        assertEquals("缓存写入必须完整可读", "执念的鱼", cached.lines[0].text)
+
+        // 任何临时文件都不该残留。
+        assertFalse(File(configDir, "$bvid.lrc.tmp").exists())
+        assertFalse(File(configDir, "$bvid.json.tmp").exists())
+        assertFalse(File(cacheDir, "$cachedBvid.json.tmp").exists())
+        assertFalse(File(cacheDir, "$bvid.json.tmp").exists())
     }
 
     @Test
@@ -578,14 +821,28 @@ class LyricsRepositoryTest {
 
     // ------------------------------------------------------------ 辅助
 
-    private fun repository(): LyricsRepository = LyricsRepository(
+    private fun repository(
+        lrclibClient: OkHttpClient = LyricsRepository.defaultLrclibClient(),
+    ): LyricsRepository = LyricsRepository(
         configDir = configDir,
         cacheDir = cacheDir,
         bili = fakeBili,
         settingsProvider = { settings },
         lrclibBaseUrl = server.url("/").toString().trimEnd('/'),
+        lrclibClient = lrclibClient,
         clock = { now },
     )
+
+    private fun drainRequests(): List<RecordedRequest> {
+        val requests = ArrayList<RecordedRequest>()
+        while (true) {
+            val request = server.takeRequest(100, TimeUnit.MILLISECONDS) ?: break
+            requests += request
+        }
+        return requests
+    }
+
+    private fun drainPaths(): List<String> = drainRequests().map { it.requestUrl!!.encodedPath }
 
     private fun respond(handler: (RecordedRequest) -> MockResponse) {
         server.dispatcher = object : Dispatcher() {

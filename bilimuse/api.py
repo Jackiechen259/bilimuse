@@ -50,6 +50,8 @@ class NotLoggedIn(BiliError):
 # 字幕地址白名单：接口返回的 subtitle_url 一旦被篡改，服务端不能当开放代理
 SUBTITLE_HOSTS = ("hdslb.com", "bilibili.com", "bilivideo.com")
 SUBTITLE_BASE = "https://www.bilibili.com"
+# 字幕 JSON 上限：正常字幕远小于这个值，超过说明响应异常，直接拒绝
+SUBTITLE_MAX_BYTES = 4 * 1024 * 1024
 
 
 def subtitle_url(url: str) -> str:
@@ -57,6 +59,8 @@ def subtitle_url(url: str) -> str:
 
     只允许 https，host 必须等于或后缀属于白名单域名；``//host/x`` 与相对
     地址分别补全成 https 和 ``https://www.bilibili.com`` 下的绝对地址。
+    返回值是用解析结果重建的 URL：userinfo、端口、fragment 以及带反斜杠 /
+    非 ASCII 的 host 一律拒绝，避免校验对象与真正请求对象不一致。
     """
     raw = str(url or "").strip()
     if not raw:
@@ -69,12 +73,17 @@ def subtitle_url(url: str) -> str:
         parsed = urllib.parse.urlsplit(raw)
     if parsed.scheme.lower() != "https":
         raise BiliError(-1, "字幕地址必须使用 https")
+    if parsed.username is not None or parsed.password is not None:
+        raise BiliError(-1, "字幕地址不允许包含账号信息")
     host = (parsed.hostname or "").lower()
-    if not host or not any(
+    if not host or "\\" in host or not host.isascii():
+        raise BiliError(-1, "字幕地址不在允许的域名内")
+    if not any(
         host == domain or host.endswith("." + domain) for domain in SUBTITLE_HOSTS
     ):
         raise BiliError(-1, "字幕地址不在允许的域名内")
-    return raw
+    # 用解析出的部件重建，不再返回可能含歧义的原始字符串
+    return urllib.parse.urlunsplit(("https", host, parsed.path, parsed.query, ""))
 
 
 def _mixin_key(orig: str) -> str:
@@ -381,11 +390,22 @@ class BiliClient:
         return tracks
 
     async def subtitle_body(self, url: str) -> dict[str, Any]:
-        """下载字幕 JSON（只走白名单地址），返回原始 dict。"""
+        """下载字幕 JSON（只走白名单地址，不跟随重定向，4 MB 上限）。
+
+        共享 client 为了正常 API 是 ``follow_redirects=True``；字幕下载必须
+        单独关掉，否则白名单域 302 到外域就能绕过校验。任何 3xx 直接拒绝。
+        """
         target = subtitle_url(url)
-        resp = await self.http.get(target)
+        resp = await self.http.get(target, follow_redirects=False)
+        if 300 <= resp.status_code < 400:
+            raise BiliError(-1, "字幕地址不允许重定向")
         resp.raise_for_status()
-        body = resp.json()
+        if len(resp.content) > SUBTITLE_MAX_BYTES:
+            raise BiliError(-1, "字幕内容超过 4 MB")
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            raise BiliError(-1, "字幕内容格式不正确") from exc
         if not isinstance(body, dict):
             raise BiliError(-1, "字幕内容格式不正确")
         return body

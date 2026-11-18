@@ -102,7 +102,9 @@ B 站标题是给人看的，不是给曲库搜的（实测 `【纯享版】孤�
 
 - `bvid` 必须匹配 `^[A-Za-z0-9]{1,24}$`，否则接口返回 400，任何情况下都不拼路径。
 - 缓存键是 `bvid`；缓存内容带 `v`（结构版本），版本不符直接丢弃。
-- 同一 `bvid` 的解析用锁合并并发请求，避免切歌/重试时重复打 LRCLIB。
+- `disabled` / `not_logged_in` 的空结果不写缓存（开关 / 登录态会变，缓存会遮蔽新结果）。
+- 有 `pin` 时跳过缓存读取，每次都真正尝试 pin；非 pin 来源的降级结果也不写缓存。
+- 同一 `bvid` 的解析用锁合并并发请求，避免切歌/重试时重复打 LRCLIB；锁表过大时清理已释放的锁。
 - `refresh=1` 绕过缓存；只清缓存，不动用户本地文件与偏好。
 
 ## 偏移
@@ -129,7 +131,8 @@ B 站标题是给人看的，不是给曲库搜的（实测 `【纯享版】孤�
   "meta": {
     "matched": {"id": 31664182, "track": "夜航星", "artist": "不才", "duration": 304},
     "available": {"local": false, "bili": "ai", "lrclib": true},
-    "cached": false
+    "cached": false,
+    "pin": null
   },
   "reason": ""
 }
@@ -137,6 +140,9 @@ B 站标题是给人看的，不是给曲库搜的（实测 `【纯享版】孤�
 
 `status` 只有 `ok` / `none`。`none` 时 `lines` 为空、`reason` 取
 `not_found` / `disabled` / `not_logged_in` / `timeout` / `error` 之一。
+`not_logged_in` 表示 B 站字幕开着但未登录且最终没有歌词（即使在线源开着但没匹配到）。
+`meta.pin` 是当前锁定的来源（`{source, id}` 或 `null`），`ok` / `none` 与缓存命中都会带，
+前端据此显示已锁定的来源。
 
 `source` 与 `source_label`：
 
@@ -163,10 +169,14 @@ B 站标题是给人看的，不是给曲库搜的（实测 `【纯享版】孤�
 {"items": [
   {"source": "local",  "available": true,  "label": "本地歌词"},
   {"source": "bili",   "available": true,  "label": "B 站字幕（AI 转写）", "kind": "ai"},
-  {"source": "lrclib", "available": true,  "label": "LRCLIB", "matched": {"track": "夜航星", "artist": "不才"}},
+  {"source": "lrclib", "available": true,  "label": "LRCLIB",
+   "matched": {"id": 31664182, "track": "夜航星", "artist": "不才"}},
   {"source": "demo",   "available": false, "label": "演示歌词"}
 ]}
 ```
+
+`matched.id` 就是锁定 LRCLIB 时可以用的候选 id；pin `lrclib` 时传的
+`pin_id` / `/use` 的 `id` 来自 `sources.matched.id` 或 `/search` 返回的 `id`。
 
 `/search` 返回：
 
@@ -254,7 +264,9 @@ B 站标题是给人看的，不是给曲库搜的（实测 `【纯享版】孤�
   LRCLIB 请求使用独立 HTTP 客户端（网页版服务端与安卓各一个），绝不与 B 站客户端共用。
 - LRCLIB User-Agent：`BiliMuse/<VERSION> (https://github.com/Jackiechen259/bilimuse)`。
 - LRCLIB 超时 6 秒；429/5xx 直接降级并缓存「未命中」，不做重试轰炸。
-- B 站字幕 URL 必须过白名单，防止接口被篡改后把服务端当代理。
+- B 站字幕 URL 必须过白名单，防止接口被篡改后把服务端当代理；校验后按解析出的
+  scheme/host/path 重建 URL，拒绝 userinfo 与非 ASCII / 带反斜杠的 host。
+- 字幕下载不跟随重定向（任何 3xx 直接拒绝），响应体上限 4 MB；LRCLIB 响应同样限 4 MB。
 - 日志里不打印 Cookie、不打印歌词全文。
 
 ## 非目标
@@ -269,10 +281,10 @@ TV 布局、改动 BTR 与音轨选择。
 - LRC：BOM + CRLF、多时间戳、`[offset:]`、毫秒精度、乱序、空行、无时间标签、GBK。
 - 清洗：`【4K】夜航星 - 不才`、`《起风了》买辣椒也用券`、`孤勇者（Live版）`。
 - 打分：完全匹配、包含匹配、instrumental 排除、时长差惩罚、阈值边界。
-- 阶梯：本地优先、pin 生效、关闭 `lyrics_online` 后不请求 LRCLIB、关闭 `lyrics_bili` 后不请求字幕。
-- 缓存：命中不请求、`refresh` 强制刷新、未命中缓存 6 小时。
+- 阶梯：本地优先、pin 生效、关闭 `lyrics_online` 后不请求 LRCLIB、关闭 `lyrics_bili` 后不请求字幕；未登录且没有歌词时 `reason=not_logged_in`。
+- 缓存：命中不请求、`refresh` 强制刷新、未命中缓存 6 小时、`disabled` / `not_logged_in` 不缓存、pin 存在时不被缓存短路。
 - 演示模式：零网络。
-- 安全：LRCLIB 请求头里没有 `Cookie`；非法 bvid 400；字幕 URL 白名单拒绝外域。
+- 安全：LRCLIB 请求头里没有 `Cookie`；非法 bvid 400；字幕 URL 白名单拒绝外域 / userinfo / 反斜杠与非 ASCII host、拒绝 3xx，响应体超 4 MB 拒绝。
 - 接口：7 个端点的正常与错误路径、导入超限、删除、偏移 clamp、设置往返。
 
 ## 已实现文件索引

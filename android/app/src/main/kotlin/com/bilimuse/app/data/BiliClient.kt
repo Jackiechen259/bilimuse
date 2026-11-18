@@ -12,12 +12,15 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.util.concurrent.TimeUnit
 
 /**
@@ -41,6 +44,17 @@ class BiliClient(
     }
 
     private val client = httpClient.newBuilder().followRedirects(true).build()
+
+    /**
+     * 字幕下载专用客户端：**不跟随重定向**。
+     *
+     * 共享客户端是 `followRedirects(true)`，只校验首跳 URL 时，白名单域可以 302 到
+     * 任意地址（例如云主机元数据接口），等于把请求变成代理。任何 3xx 一律拒绝。
+     */
+    private val subtitleClient = httpClient.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
 
     val session: SessionData
         get() = synchronized(lock) { current }
@@ -429,27 +443,61 @@ class BiliClient(
     }
 
     /** 下载并解析字幕 JSON；URL 不在白名单内时直接拒绝，不发任何请求。 */
-    override suspend fun subtitleBody(url: String): JsonObject = withContext(Dispatchers.IO) {
+    override suspend fun subtitleBody(url: String): JsonObject {
         val resolved = resolveSubtitleUrl(url)
             ?: throw BiliException(-1, "字幕地址不受信任")
-        val request = Request.Builder()
-            .url(resolved)
-            .header("User-Agent", UA)
-            .header("Referer", REFERER)
-            .get()
-            .build()
-        val response = try {
-            client.newCall(request).execute()
-        } catch (e: IOException) {
-            if (e is BiliException) throw e
-            throw BiliException(-1, "字幕下载失败，请检查网络后重试")
+        return downloadSubtitle(resolved)
+    }
+
+    /**
+     * 下载已通过白名单校验的字幕地址（单测直接调用以覆盖重定向 / 体积限制）。
+     *
+     * - 使用不跟随重定向的客户端：任何 3xx 都视为失败，避免白名单域把请求转发到内网；
+     * - 响应体上限 [SUBTITLE_MAX_BYTES]（4 MB），超过就拒绝，避免被超大响应拖垮。
+     */
+    internal suspend fun downloadSubtitle(resolvedUrl: String): JsonObject =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url(resolvedUrl)
+                .header("User-Agent", UA)
+                .header("Referer", REFERER)
+                .get()
+                .build()
+            val response = try {
+                subtitleClient.newCall(request).execute()
+            } catch (e: IOException) {
+                throw BiliException(-1, "字幕下载失败，请检查网络后重试")
+            }
+            response.use { res ->
+                val code = res.code
+                if (code in 300..399) {
+                    throw BiliException(-1, "字幕地址发生了重定向")
+                }
+                if (!res.isSuccessful) throw BiliException(-1, "HTTP $code")
+                val body = res.body ?: throw BiliException(-1, "字幕数据为空")
+                if (body.contentLength() > SUBTITLE_MAX_BYTES) {
+                    throw BiliException(-1, "字幕数据超过 4 MB")
+                }
+                val text = readLimited(body.byteStream())
+                Json.parseToJsonElement(text) as? JsonObject
+                    ?: throw BiliException(-1, "字幕数据格式异常")
+            }
         }
-        response.use {
-            if (!it.isSuccessful) throw BiliException(-1, "HTTP ${it.code}")
-            val text = it.body?.string().orEmpty()
-            Json.parseToJsonElement(text) as? JsonObject
-                ?: throw BiliException(-1, "字幕数据格式异常")
+
+    private fun readLimited(input: InputStream): String {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(8 * 1024)
+        var total = 0L
+        input.use { stream ->
+            while (true) {
+                val read = stream.read(buffer)
+                if (read < 0) break
+                total += read
+                if (total > SUBTITLE_MAX_BYTES) throw BiliException(-1, "字幕数据超过 4 MB")
+                output.write(buffer, 0, read)
+            }
         }
+        return output.toString("UTF-8")
     }
 
     data class PageInfo(val cid: Long, val duration: Int, val part: String)
@@ -478,15 +526,21 @@ class BiliClient(
         /** 字幕 CDN 白名单后缀。 */
         private val SUBTITLE_HOST_SUFFIXES = listOf(".hdslb.com", ".bilibili.com", ".bilivideo.com")
 
+        /** 字幕响应体上限（4 MB）：超过就拒绝，避免被超大响应拖垮。 */
+        const val SUBTITLE_MAX_BYTES = 4L * 1024 * 1024
+
         /**
          * 字幕地址白名单：协议必须是 https，host 必须是 B 站自家域名；
          * `//host/path` 与 `/path` 这类相对地址按 `https://www.bilibili.com` 补全。
          *
-         * 返回补全后的绝对地址；不合法时返回 null（调用方直接拒绝，避免被当成代理）。
+         * 返回用解析后的 scheme/host 重建的绝对地址；不合法时返回 null（调用方直接拒绝，
+         * 避免被当成代理）。显式拒绝 userinfo、反斜杠与非 ASCII host。
          */
         fun resolveSubtitleUrl(raw: String): String? {
             val trimmed = raw.trim()
             if (trimmed.isEmpty()) return null
+            // 反斜杠会被部分解析器当成 `/`，明确拒绝，避免 `https://i0.hdslb.com\@evil.com` 之类的歧义。
+            if (trimmed.contains('\\')) return null
             val absolute = when {
                 trimmed.startsWith("//") -> "https:$trimmed"
                 trimmed.startsWith("https://", ignoreCase = true) -> trimmed
@@ -494,13 +548,32 @@ class BiliClient(
                 trimmed.startsWith("/") -> "$REFERER$trimmed"
                 else -> "$REFERER/$trimmed"
             }
+            val authority = absolute.substringAfter("://", "")
+                .substringBefore('/')
+                .substringBefore('?')
+                .substringBefore('#')
+            if (authority.isEmpty()) return null
+            // 显式拒绝 userinfo：`https://i0.hdslb.com@evil.com/...` 的真实 host 是 evil.com。
+            if (authority.contains('@')) return null
+            // 显式拒绝非 ASCII host：IDN / 全角句点归一化可能把 `i0。hdslb.com` 变成白名单域。
+            if (authority.any { it.code > 127 }) return null
+            if (authority.any { it.isWhitespace() }) return null
             val parsed = absolute.toHttpUrlOrNull() ?: return null
             if (!parsed.scheme.equals("https", ignoreCase = true)) return null
+            if (parsed.username.isNotEmpty() || parsed.password.isNotEmpty()) return null
             val host = parsed.host.lowercase()
             val allowed = SUBTITLE_HOST_SUFFIXES.any { suffix ->
                 host == suffix.removePrefix(".") || host.endsWith(suffix)
             }
-            return if (allowed) parsed.toString() else null
+            if (!allowed) return null
+            // 用解析后的 scheme/host 重建 URL，丢掉原始字符串里可能夹带的东西。
+            val builder = HttpUrl.Builder()
+                .scheme("https")
+                .host(parsed.host)
+                .port(parsed.port)
+                .encodedPath(parsed.encodedPath)
+            parsed.encodedQuery?.let { builder.encodedQuery(it) }
+            return builder.build().toString()
         }
     }
 }

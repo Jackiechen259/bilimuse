@@ -21,6 +21,7 @@ class LyricsMatchTest {
         val candidates = LyricsMatch.candidates("【纯享版】夜航星 - 不才", "某UP")
         assertEquals("夜航星", candidates[0].track)
         assertEquals("不才", candidates[0].artist)
+        assertTrue("标题解析出的歌手才算 artist", candidates[0].artistFromTitle)
     }
 
     @Test
@@ -35,16 +36,17 @@ class LyricsMatchTest {
         val candidates = LyricsMatch.candidates("孤勇者（Live版）", "陈奕迅")
         assertEquals("孤勇者", candidates[0].track)
         assertEquals("陈奕迅", candidates[0].artist)
+        assertFalse("UP 主兜底的歌手不能当成标题解析结果", candidates[0].artistFromTitle)
         assertEquals("孤勇者 陈奕迅", LyricsMatch.searchQuery("孤勇者（Live版）", "陈奕迅"))
     }
 
     @Test
-    fun trackScoreUsesExactContainsAndBigramOverlap() {
+    fun trackScoreUsesJaccardLikePython() {
         assertEquals(1.0, LyricsMatch.trackScore("夜航星", "夜航星"), 1e-6)
         assertEquals(0.8, LyricsMatch.trackScore("夜航星", "夜航"), 1e-6)
         assertEquals(1.0, LyricsMatch.trackScore("NIGHT FLIGHT", "night flight"), 1e-6)
-        // 二元组：{夜航, 航星} 与 {星夜, 夜航}，重合 1 组 → Dice = 2*1/(2+2) = 0.5
-        assertEquals(0.5, LyricsMatch.trackScore("夜航星", "星夜航"), 1e-6)
+        // 二元组：{夜航, 航星} 与 {星夜, 夜航}，交集 1、并集 3 → Jaccard = 1/3（与 Python 一致）
+        assertEquals(1.0 / 3.0, LyricsMatch.trackScore("夜航星", "星夜航"), 1e-6)
         assertEquals(0.0, LyricsMatch.trackScore("夜航星", "完全无关"), 1e-6)
     }
 
@@ -66,6 +68,28 @@ class LyricsMatchTest {
     }
 
     @Test
+    fun unknownDurationIsNotPenalizedLikePython() {
+        // Python duration_score：任一方时长未知（≤0）直接返回 1.0，不惩罚。
+        assertEquals(1.0, LyricsMatch.durationScore(0, 304), 1e-6)
+        assertEquals(1.0, LyricsMatch.durationScore(304, 0), 1e-6)
+        assertEquals(1.0, LyricsMatch.durationScore(0, 0), 1e-6)
+
+        val candidate = LyricsCandidate(
+            id = 1,
+            track = "夜航星",
+            artist = "不才",
+            album = "",
+            duration = 0,
+            instrumental = false,
+            synced = true,
+        )
+        val score = LyricsMatch.score(candidate, LyricsMatch.Query("夜航星", "不才"), "不才", 304)
+        assertEquals(1.0, score.duration, 1e-6)
+        assertEquals(0.98, score.total, 1e-6)
+        assertTrue(score.accepted)
+    }
+
+    @Test
     fun weightedScoreAndAcceptanceBoundary() {
         val candidate = LyricsCandidate(
             id = 1,
@@ -79,6 +103,17 @@ class LyricsMatchTest {
         val score = LyricsMatch.score(candidate, LyricsMatch.Query("夜航星", "不才"), "不才", 304)
         assertEquals(0.98, score.total, 1e-6)
         assertTrue(score.accepted)
+
+        // 近似标题（包含匹配 0.8）时与 Python 结果一致：0.8*0.6 + 0.9*0.2 + 1.0*0.2 = 0.86。
+        val approximate = LyricsMatch.score(
+            candidate.copy(track = "夜航星 - Live"),
+            LyricsMatch.Query("夜航星", "不才"),
+            "不才",
+            304,
+        )
+        assertEquals(0.8, approximate.track, 1e-6)
+        assertEquals(0.86, approximate.total, 1e-6)
+        assertTrue(approximate.accepted)
 
         // 总分 0.62 恰好通过（≥0.62），track 分也达标。
         val boundary = LyricsMatch.MatchScore(track = 0.8, artist = 0.5, duration = 0.2)

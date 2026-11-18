@@ -2905,7 +2905,9 @@ function lyricsShowEmpty(title, hint, actions, { loading = false } = {}) {
   if (hintEl) hintEl.textContent = hint || '';
   ['import', 'search', 'retry', 'login', 'settings'].forEach((key) => {
     const button = $(`np-lyrics-empty-${key}`);
-    if (button) button.classList.toggle('hidden', !actions.includes(key));
+    // 演示模式零网络：不提供在线搜索入口
+    const hidden = !actions.includes(key) || (state.demo && key === 'search');
+    if (button) button.classList.toggle('hidden', hidden);
   });
   const jump = $('np-lyrics-jump');
   if (jump) jump.classList.add('hidden');
@@ -2958,6 +2960,12 @@ function lyricsRenderToolbar() {
       const button = $(id);
       if (button) button.disabled = !bvid;
     });
+  // 演示模式不发任何网络请求：搜索按钮禁用并在 tooltip 里说明
+  const searchBtn = $('np-lyrics-search-btn');
+  if (searchBtn) {
+    searchBtn.disabled = !bvid || state.demo;
+    searchBtn.title = state.demo ? '演示模式不搜索在线歌词' : '在 LRCLIB 搜索歌词';
+  }
   const down = $('np-lyrics-offset-down');
   const up = $('np-lyrics-offset-up');
   if (down) down.disabled = !synced;
@@ -3026,13 +3034,31 @@ function lyricsPickFile() {
 }
 
 function lyricsReadFile(file) {
-  if (file && typeof file.text === 'function') return file.text();
+  if (file && typeof file.arrayBuffer === 'function') {
+    return file.arrayBuffer().then(lyricsDecodeBuffer);
+  }
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onload = () => resolve(lyricsDecodeBuffer(reader.result));
     reader.onerror = () => reject(reader.error || new Error('读取失败'));
-    reader.readAsText(file, 'utf-8');
+    reader.readAsArrayBuffer(file);
   });
+}
+
+/** 编码回退：UTF-8（严格）→ GBK → UTF-8（替换非法字节），与服务端一致。 */
+function lyricsDecodeBuffer(buffer) {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer || []);
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch (_) { /* 不是合法 UTF-8，继续试 GBK */ }
+  try {
+    return new TextDecoder('gbk').decode(bytes);
+  } catch (_) { /* 旧环境没有 GBK 解码器 */ }
+  try {
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch (_) {
+    return '';
+  }
 }
 
 async function lyricsHandleFile(file) {
@@ -3142,7 +3168,7 @@ function lyricsSearchHidden() {
 }
 
 function lyricsOpenSearch() {
-  if (!state.lyricsOpen) return;
+  if (!state.lyricsOpen || state.demo) return;
   lyricsCloseSources();
   const panel = $('np-lyrics-search');
   const input = $('np-lyrics-search-input');
@@ -3171,6 +3197,7 @@ function lyricsCloseSearch({ focus = false } = {}) {
 }
 
 async function lyricsRunSearch(query) {
+  if (state.demo) return;   // 演示模式不搜索在线歌词
   const q = String(query == null ? '' : query).trim();
   const token = ++lyricsSearchToken;
   const box = $('np-lyrics-search-result');
@@ -3231,6 +3258,7 @@ async function lyricsUseCandidate(item) {
     state.lyricsPrefs.pinSource = 'lrclib';
     state.lyricsPrefs.pinId = id;
     lyricsCloseSearch();
+    lyricsCloseSources();
     if (res && Array.isArray(res.lines)) {
       lyricsApplyResult(res, { bvid, announce: '已采用这条歌词' });
     } else if (res && res.status === 'none') {
@@ -3313,7 +3341,18 @@ function lyricsSourceRow(item, auto) {
     button.disabled = true;
     button.title = '这个来源当前不可用';
   }
-  button.addEventListener('click', () => lyricsPinSource(source, label));
+  button.addEventListener('click', () => {
+    if (!auto && source === 'lrclib' && item.matched && item.matched.id != null) {
+      // 换源点 LRCLIB：/use 会取具体候选并锁定；只发 pin_source=lrclib 没有 id 会 400
+      lyricsUseCandidate({
+        id: item.matched.id,
+        track: item.matched.track,
+        artist: item.matched.artist,
+      });
+      return;
+    }
+    lyricsPinSource(source, label);
+  });
   return button;
 }
 

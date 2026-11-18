@@ -20,6 +20,11 @@ object LyricsMatch {
     data class Query(
         val track: String,
         val artist: String = "",
+        /**
+         * [artist] 是否来自标题解析（`歌名 - 歌手` / `《歌名》歌手`）。
+         * UP 主兜底的歌手只用于打分与搜索提示，不能当 `artist_name` 查询参数。
+         */
+        val artistFromTitle: Boolean = true,
     )
 
     /** 三个分项与加权总分。 */
@@ -89,8 +94,13 @@ object LyricsMatch {
 
         splitByDash(cleanTitle(title))?.let { (track, artist) ->
             val cleanedTrack = track.trim()
+            val parsedArtist = artist.trim()
             if (cleanedTrack.isNotEmpty()) {
-                result += Query(cleanedTrack, artist.trim().ifEmpty { fallbackArtist })
+                result += Query(
+                    track = cleanedTrack,
+                    artist = parsedArtist.ifEmpty { fallbackArtist },
+                    artistFromTitle = parsedArtist.isNotEmpty(),
+                )
             }
         }
 
@@ -98,13 +108,19 @@ object LyricsMatch {
             val track = cleanTitle(match.groupValues[1])
             if (track.isNotEmpty()) {
                 val outside = cleanTitle(normalizedTitle.replace(match.value, " "))
-                result += Query(track, outside.ifEmpty { fallbackArtist })
+                result += Query(
+                    track = track,
+                    artist = outside.ifEmpty { fallbackArtist },
+                    artistFromTitle = outside.isNotEmpty(),
+                )
             }
         }
 
         if (result.isEmpty()) {
             val track = cleanTitle(title)
-            if (track.isNotEmpty()) result += Query(track, fallbackArtist)
+            if (track.isNotEmpty()) {
+                result += Query(track, fallbackArtist, artistFromTitle = false)
+            }
         }
         return result.take(2).toList()
     }
@@ -119,7 +135,7 @@ object LyricsMatch {
         }
     }
 
-    /** track 分：完全相等 1.0；包含 0.8；否则字符二元组重合率。 */
+    /** track 分：完全相等 1.0；包含 0.8；否则字符二元组 Jaccard 重合率（与 Python 一致）。 */
     fun trackScore(candidate: String, query: String): Double {
         val left = normalize(candidate)
         val right = normalize(query)
@@ -131,7 +147,8 @@ object LyricsMatch {
         if (leftBigrams.isEmpty() || rightBigrams.isEmpty()) return 0.0
         val overlap = leftBigrams.count { it in rightBigrams }
         if (overlap == 0) return 0.0
-        return 2.0 * overlap / (leftBigrams.size + rightBigrams.size)
+        val union = (leftBigrams + rightBigrams).size
+        return overlap.toDouble() / union
     }
 
     /** artist 分：与候选歌手或 UP 主相等 0.9；包含 0.5；否则 0。 */
@@ -146,9 +163,13 @@ object LyricsMatch {
         return 0.0
     }
 
-    /** 时长分：差 ≤2 秒 1.0，之后每秒线性衰减，60 秒以上 0。 */
+    /**
+     * 时长分：差 ≤2 秒 1.0，之后每秒线性衰减，60 秒以上 0。
+     *
+     * 候选或视频时长未知（≤0）时返回 1.0，不惩罚——与 Python `duration_score` 一致。
+     */
     fun durationScore(candidateDurationSec: Int, videoDurationSec: Int): Double {
-        if (candidateDurationSec <= 0 || videoDurationSec <= 0) return 0.0
+        if (candidateDurationSec <= 0 || videoDurationSec <= 0) return 1.0
         val diff = abs(candidateDurationSec - videoDurationSec)
         if (diff <= 2) return 1.0
         return (1.0 - (diff - 2) / 60.0).coerceAtLeast(0.0)

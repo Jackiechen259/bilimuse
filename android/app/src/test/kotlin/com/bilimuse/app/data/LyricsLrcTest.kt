@@ -100,6 +100,14 @@ class LyricsLrcTest {
     }
 
     @Test
+    fun staticLyricsTrimEdgesAndCollapseBlankRuns() {
+        val result = LyricsLrc.parse("\n\n第一行\n\n\n\n第二行\n\n")
+        assertFalse(result.synced)
+        // 首尾空行裁掉，中间连续空行最多保留 2 个（与文档 / Python 修复后行为一致）。
+        assertEquals(listOf("第一行", "", "", "第二行"), result.lines.map { it.text })
+    }
+
+    @Test
     fun truncatesAtTwoThousandLines() {
         val text = (1..2_100).joinToString("\n") { index ->
             String.format("[%02d:%02d.00]L%d", index / 60, index % 60, index)
