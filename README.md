@@ -16,6 +16,7 @@ BiliMuse 把这两件事一起解决：扫码登录后直接列出你的收藏�
 - **收藏夹显示管理**：桌面 / 网页版在设置里、安卓版在独立的「收藏夹管理」页逐项开关，支持一键全选 / 一键全不选；只影响本机列表，不会取消 B 站收藏，新收藏夹默认显示
 - **音质优先**：Hi-Res 无损 → 杜比全景声 → 最高码率（192K/132K/64K）
 - **播放详情页**：大封面 + 走带 + 播放队列组成的一屏播放器；BTR 遥测收进底部「传输详情」抽屉，不再和队列抢版面。打开 / 返回时底部封面会放大飞入、再飞回播放条，版面错峰淡入；封面随鼠标轻微倾斜、带高光与环境光视差，切歌时新旧封面交叉溶解；`F` 打开、`Esc` 返回、`Q` 收起队列；窗口不高时自动换成封面在左、走带在右的横向布局
+- **整页同步歌词**：三端一致的整页同步歌词，走带「词」键或 `L` 打开；来源依次为本地 LRC、B 站人工字幕、LRCLIB、B 站 AI 字幕，界面始终标注来源；支持点行跳转、偏移 ±0.5s、导入 `.lrc`；网页 / 桌面版还可搜索并锁定 LRCLIB 候选、换源；只有打开歌词视图时才请求，失败不影响播放。设计见 [docs/LYRICS.md](docs/LYRICS.md)
 - **界面动效**：桌面版启动页有缓慢反向旋转的唱片环与进度发丝，进入应用后侧栏 / 顶栏 / 播放条错峰落位；收藏夹列表、设置分类、播放队列分批浮入；主题切换从点击的圆点向外做圆形揭示（View Transitions，WebView2 / Chromium；旧内核直接切换）；播放键涟漪、进度条悬停预览、窗口按钮图标交叉淡出。系统开启「减少动态效果」时全部跳过
 - **三套界面风格（网页版 / 桌面版）**：墨（黑白深色）/ 纸（黑白浅色）/ 米（暖调纸面），侧栏底部、播放详情顶栏或设置 → 外观一键切换；界面本身几乎无彩色，让封面成为页面上唯一的颜色。选择会写入本机设置，重启或换端口后仍然保留
 - **BTR 引擎**：多 Range 并发、多 CDN 竞速、慢块对冲、断点续传、按实测速度加权调度；起播不等全部测速，并发随线路自适应，节点 / 分块 / 速度在播放器右下角实时可见
@@ -219,10 +220,10 @@ bilimuse/
 │   │   ├── data/       # WBI 签名、B 站 API、登录态、演示 CDN、自动更新
 │   │   ├── player/     # MediaLibraryService / MediaController / DataSource
 │   │   └── ui/         # Compose 界面
-│   └── app/src/test/   # 55 个 JVM 测试
+│   └── app/src/test/   # 100 个 JVM 测试
 ├── scripts/            # 基准脚本 + 边车打包 / 图标生成
-├── tests/              # 测试：引擎正确性、限速场景提速、断流恢复、Range、启动器
-└── docs/               # ARCHITECTURE.md / DESKTOP.md / ANDROID.md
+├── tests/              # 测试：引擎正确性、限速场景提速、断流恢复、Range、启动器、歌词
+└── docs/               # ARCHITECTURE.md / DESKTOP.md / PLAYBACK.md / ANDROID.md / LYRICS.md
 ```
 
 ## API
@@ -243,13 +244,17 @@ bilimuse/
 | `POST` | `/api/track` | 解析音轨：`{"bvid": "..."}` → 流 ID、大小、音质、节点数 |
 | `GET/HEAD` | `/api/stream/{id}` | 音频流，支持 `Range` |
 | `GET` | `/api/stats/{id}` | 引擎实时指标（节点、块、速度、对冲） |
+| `GET/POST/DELETE` | `/api/lyrics/{bvid}` 及 `/sources`、`/prefs`、`/search`、`/use` | 歌词解析与来源、导入 / 删除本地 LRC、LRCLIB 搜索与锁定、偏移偏好 |
 | `GET/POST` | `/api/settings` | 开关 BTR、并发数、块大小、无损偏好、音量、自动播放、隐藏收藏夹 ID、界面主题（`ink` / `paper` / `cream`）；持久化到 `settings.json` |
 
 ## 测试
 
 ```bash
-.venv/bin/python -m pytest -q      # 43 passed
+.venv/bin/python -m pytest -q      # 137 passed
 ```
+
+本轮歌词功能新增 91 个 Python 用例。本地 Windows 上 `test_launcher.py::test_port_conflict_raises`
+与 `tests/test_btr.py` 里两个计时断言会偶发失败，属既有平台 / 时序问题，与歌词无关。
 
 桌面登录桥（回环 HTTP 解析 / chunked / cookie 域过滤）另有 7 个 Rust 单元测试：
 
@@ -257,7 +262,7 @@ bilimuse/
 cd desktop/src-tauri && cargo test --release login
 ```
 
-安卓版的引擎、WBI 签名、演示 CDN、音轨选择、Android Auto 媒体 ID、自动更新、播放队列展示和随机顺序展开另有 55 个纯 JVM 测试（不需要模拟器）：
+安卓版的引擎、WBI 签名、演示 CDN、音轨选择、Android Auto 媒体 ID、自动更新、播放队列展示、随机顺序展开和歌词解析与匹配另有 100 个纯 JVM 测试（不需要模拟器）：
 
 ```bash
 cd android && ./gradlew :app:testDebugUnitTest
@@ -270,7 +275,9 @@ cd android && ./gradlew :app:testDebugUnitTest
 - Hi-Res / 杜比音轨需要大会员账号，普通账号最高 192K
 - 番剧、付费课程、部分版权内容拿不到 dash 流，会返回错误
 - 只读收藏夹，不做收藏 / 投币 / 评论等写操作
-- 播放详情页不提供歌词：收藏夹里是视频，音轨没有歌词源；主画面留给封面与走带，右侧是播放队列，BTR 遥测收进底部抽屉
+- 歌词依赖 B 站字幕与 LRCLIB，冷门 / 自制视频可能没有歌词
+- LRCLIB 匹配的是歌曲版本，视频带前奏 / 口白时整首可能偏移，可用 ±0.5s 手动校正
+- B 站 AI 字幕是语音识别，可能有错字
 - 默认只监听 `127.0.0.1`，**不要直接暴露到公网**：它是一个带登录态的本机代理
 - 单进程内存缓存 48 条音轨的流信息（不含音频数据）
 

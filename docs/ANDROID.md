@@ -70,6 +70,10 @@ android/
 │   │   ├── BiliClient.kt      # 扫码登录 / 收藏夹 / playurl / 音轨选择
 │   │   ├── SessionStore.kt    # 登录态持久化
 │   │   ├── SettingsStore.kt   # BTR / 收藏夹显示设置持久化
+│   │   ├── LyricsModels.kt    # 歌词行 / 结果 / 候选 / UI 状态
+│   │   ├── LyricsLrc.kt       # LRC 解析与编码回退（纯 JVM，可单测）
+│   │   ├── LyricsMatch.kt     # 标题清洗、LRCLIB 候选与打分（纯 JVM，可单测）
+│   │   ├── LyricsRepository.kt# 来源阶梯、本地文件、缓存、B 站字幕、LRCLIB
 │   │   ├── DemoCdn.kt         # 演示模式：合成 WAV + 限速 Interceptor
 │   │   ├── StreamRegistry.kt  # 30 分钟 / 48 条音轨缓存，懒解析
 │   │   └── update/            # GitHub Releases 自动更新（检查/下载/校验/安装）
@@ -79,7 +83,8 @@ android/
 │   │   ├── PlayerController.kt# UI ↔ MediaController 桥（含实际播放队列）
 │   │   ├── PlayQueueUiState.kt# 队列面板的纯展示状态与文案
 │   │   └── BtrDataSource.kt   # Media3 DataSource
-│   ├── ui/                    # Compose 界面、主题、登录/收藏夹/设置/更新/播放队列
+│   ├── ui/                    # Compose 界面、主题、登录/收藏夹/设置/更新/播放队列/歌词
+│   │   ├── LyricsPanel.kt     # 整页同步歌词
 │   │   └── Motion.kt          # 动效令牌 / 减弱动效 / 按压 / 骨架屏 / 封面视差与主色
 │   ├── MainViewModel.kt
 │   └── MainActivity.kt
@@ -322,6 +327,8 @@ APK 资产的选择规则：优先名字带 `universal` 的；其次没有 ABI �
 - BTR 开关、并发数（2–24）、分块大小（256 KB / 512 KB / 1 MB）、无损优先
 - 实时引擎指标：节点、并发、块进度、瞬时速度、对冲/重试次数
 - 播放页可隐藏 BTR 详情卡片（设置 → 播放页 →「显示 BTR 详情」）
+- 整页同步歌词：播放页顶部「词」按钮切换，自动跟随、点行 seek、±0.5s 偏移、导入 `.lrc`；
+  来源标注本地 / B 站字幕 / LRCLIB，来源阶梯与网页 / 桌面一致
 - 后台播放：锁屏、通知栏、耳机线控/蓝牙按键（MediaSession）
 - 演示模式：不登录也能跑通整条播放链路，每条连接限速 320 KB/s，可直观看到 BTR 与单连接的差别
 - GitHub Releases 自动更新：启动静默检查（可关）、设置页手动检查、下载进度、APK 完整性与签名校验后交给系统安装器
@@ -387,6 +394,34 @@ MediaController ──(timeline / shuffle 变化)──> PlayerController.queue
 `PlayerController` 只在时间线或随机模式变化时重建队列，进度 tick 不复制列表；
 `PlayQueueUiState` 的文案与分页判断是纯数据逻辑，由 `PlayQueueUiStateTest` 覆盖。
 
+## 歌词
+
+正在播放页顶部工具区有「词」按钮（`LyricsToggleButton`，对应网页版 `#np-lyrics-btn`）。
+打开后用 `LyricsPanel` 替换封面与曲目信息，进度条 / 走带 / 队列保持可见；再点「词」、
+工具栏的收起按钮或系统返回键回到封面视图。
+
+- 自动跟随：`LazyColumn` 按播放位置高亮当前行并居中；用户拖动列表后暂停跟随，底部出现
+  「回到当前」，点它或切歌后恢复。
+- 点行 seek：同步歌词点任意一行跳到 `timeMs + offsetMs`；静态歌词（`synced=false`）不跟随、
+  不显示偏移控件。
+- 偏移：步进 ±0.5s、范围 ±30s、可一键复位，按 bvid 持久化；工具行同时显示来源标签与
+  LRCLIB 匹配到的歌名 / 歌手。
+- 换源：工具行「换源」用 `ModalBottomSheet` 列出 `LyricsRepository.sources()` 的各来源可用性
+  （含「自动匹配」）；选 `bili` / `local` / `demo` 调 `setPin()` 后重新解析，选 LRCLIB 候选走
+  `useCandidate()`，「自动匹配」清掉 pin。
+- 搜索：工具行「搜索」弹对话框，预填 `LyricsMatch.searchQuery()` 清洗后的歌名 / 歌手，输入
+  防抖 400ms 查 `LyricsRepository.search()`，点某条候选 `useCandidate()` 并立即刷新。
+- 导入：`ActivityResultContracts.OpenDocument` 拉起系统文件选择器（`text/plain` 优先，兼容
+  没有 MIME 的 `.lrc`），读成文本交给 ViewModel，按 UTF-8 写进应用私有目录。
+- 设置：设置 → 歌词 →「在线匹配歌词」（`lyricsOnline`）与「读取 B 站字幕」（`lyricsBili`）
+  两个开关；关闭后对应来源直接跳过，本地 LRC 与演示歌词不受影响。
+- 演示模式（`DEMO0001..3`）显示与网页 / 桌面同一份演示歌词，不联网。
+- 数据层 `LyricsRepository` 与网页 / 桌面共用同一套来源阶梯（本地 LRC → pin → B 站人工字幕
+  → LRCLIB → B 站 AI 字幕 → 无）和清洗 / 打分规则，细节见 [LYRICS.md](LYRICS.md)。
+
+只在歌词视图打开时才解析（`MainViewModel.toggleLyrics` / `openLyrics`），切歌时若打开则重载，
+迟到回包按 `bvid` 丢弃；加载、没有歌词或出错都只显示空状态，不影响播放。
+
 ## 登录方式
 
 | 方式 | 实现 | 人机验证 | 说明 |
@@ -432,7 +467,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 
 ## 测试
 
-`./gradlew :app:testDebugUnitTest` 共 55 个 JVM 测试：
+`./gradlew :app:testDebugUnitTest` 共 100 个 JVM 测试：
 
 - **WbiTest**：mixin key、`w_rid`、中文/空格/特殊字符编码与 Python 实现一致
 - **BtrEngineTest**：
@@ -456,7 +491,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 ## 已验证
 
 - `:app:assembleDebug` 成功，产物 `app-debug.apk` 约 14 MB
-- 55 个 JVM 测试全部通过
+- 100 个 JVM 测试全部通过
 - Pixel 8 API 36 模拟器（软件渲染）上用演示模式验证：播放 → 打开正在播放 → 打开队列面板 →
   点选切歌 → 随机模式标签 → 返回关闭面板；并实机验证错峰入场、播放页封面视差 / 主色光晕、
   播放键光环、搜索展开、收藏夹页转场、队列面板与登录弹窗动画
@@ -471,7 +506,7 @@ B 站的密码登录和短信登录都强制要求极验 `validate`/`seccode`（
 
 ## 已知限制
 
-- 开发机没有可用的 KVM，**尚未在真机/模拟器上做完整的扫码 → 播放回归**；目前已验证编译、55 个 JVM 测试、真实二维码接口、Robolectric 界面渲染和模拟器上的演示播放 / 动效回归。第一次装到手机上建议先用「演示模式」确认播放链路
+- 开发机没有可用的 KVM，**尚未在真机/模拟器上做完整的扫码 → 播放回归**；目前已验证编译、100 个 JVM 测试、真实二维码接口、Robolectric 界面渲染和模拟器上的演示播放 / 动效回归。第一次装到手机上建议先用「演示模式」确认播放链路
 - 自动更新需要 Release 已发布且包含 APK 资产；草稿 / Pre-release 不会被应用看到
 - Android 要求用户在系统安装器里确认，无法像桌面版那样静默安装；下载过程也不驻留后台服务
 - 自动更新的系统安装器、未知来源授权流程尚未在真机上回归（开发机没有可用 KVM）
