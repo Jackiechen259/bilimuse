@@ -330,6 +330,64 @@
           </div>
         </div>
 
+        <!-- 整页同步歌词：打开时替换封面与曲目信息的位置，进度 / 走带 / 底部状态 /
+             右侧播放队列都保持原位。懒加载：只有这个区块可见时才请求歌词接口。 -->
+        <section class="np-lyrics hidden" id="np-lyrics" aria-label="歌词">
+          <div class="np-lyrics-bar">
+            <div class="np-lyrics-meta">
+              <span class="np-lyrics-source" id="np-lyrics-source">歌词</span>
+              <span class="np-lyrics-match" id="np-lyrics-match"></span>
+            </div>
+            <div class="np-lyrics-tools" id="np-lyrics-tools">
+              <div class="np-lyrics-offset hidden" id="np-lyrics-offset">
+                <button class="np-lyrics-tool" id="np-lyrics-offset-down" type="button"
+                  title="歌词提前 0.5 秒（[）" aria-label="歌词提前 0.5 秒">−0.5s</button>
+                <span class="np-lyrics-offset-value" id="np-lyrics-offset-value">+0.0s</span>
+                <button class="np-lyrics-tool" id="np-lyrics-offset-up" type="button"
+                  title="歌词延后 0.5 秒（]）" aria-label="歌词延后 0.5 秒">+0.5s</button>
+              </div>
+              <button class="np-lyrics-tool" id="np-lyrics-rematch" type="button" title="忽略缓存，重新匹配歌词">重新匹配</button>
+              <button class="np-lyrics-tool" id="np-lyrics-search-btn" type="button" title="在 LRCLIB 搜索歌词">搜索</button>
+              <button class="np-lyrics-tool" id="np-lyrics-import-btn" type="button" title="导入本地 LRC 文件">导入</button>
+              <button class="np-lyrics-tool" id="np-lyrics-sources-btn" type="button" title="更换歌词来源"
+                aria-haspopup="true" aria-expanded="false">换源</button>
+            </div>
+          </div>
+
+          <div class="np-lyrics-scroll" id="np-lyrics-scroll">
+            <ol class="np-lyrics-list" id="np-lyrics-list"></ol>
+          </div>
+
+          <div class="np-lyrics-empty hidden" id="np-lyrics-empty">
+            <p class="np-lyrics-empty-title" id="np-lyrics-empty-text">没有找到歌词</p>
+            <p class="np-lyrics-empty-hint" id="np-lyrics-empty-hint"></p>
+            <div class="np-lyrics-empty-actions">
+              <button class="ghost np-lyrics-empty-action" id="np-lyrics-empty-import" type="button">导入 LRC</button>
+              <button class="ghost np-lyrics-empty-action" id="np-lyrics-empty-search" type="button">在线搜索</button>
+              <button class="ghost np-lyrics-empty-action" id="np-lyrics-empty-retry" type="button">重试</button>
+              <button class="ghost np-lyrics-empty-action" id="np-lyrics-empty-login" type="button">去登录</button>
+              <button class="ghost np-lyrics-empty-action" id="np-lyrics-empty-settings" type="button">去设置</button>
+            </div>
+          </div>
+
+          <button class="np-lyrics-jump hidden" id="np-lyrics-jump" type="button">回到当前</button>
+
+          <input type="file" id="np-lyrics-file" accept=".lrc,.txt,text/plain" hidden />
+
+          <!-- 在线搜索：预填清洗后的「歌名 歌手」，点「用这条」锁定 LRCLIB 候选 -->
+          <div class="np-lyrics-search hidden" id="np-lyrics-search" role="dialog" aria-label="搜索歌词">
+            <div class="np-lyrics-search-head">
+              <input class="np-lyrics-search-input" id="np-lyrics-search-input" type="search"
+                autocomplete="off" spellcheck="false" placeholder="搜索歌名或歌手…" aria-label="搜索歌词" />
+              <button class="np-lyrics-tool" id="np-lyrics-search-close" type="button">关闭</button>
+            </div>
+            <div class="np-lyrics-search-result" id="np-lyrics-search-result"></div>
+          </div>
+
+          <!-- 换源弹出菜单：内容由 /api/lyrics/{bvid}/sources 动态生成 -->
+          <div class="np-lyrics-sources hidden" id="np-lyrics-sources" role="menu" aria-label="歌词来源"></div>
+        </section>
+
         <div class="np-console">
           <div class="np-trackline">
             <div class="np-eyebrow">
@@ -395,6 +453,10 @@
                 <path d="M17.8 5.6v12.8" />
                 <path d="M5 6.3v11.4a1 1 0 0 0 1.55.83l9.1-5.7a1 1 0 0 0 0-1.66l-9.1-5.7A1 1 0 0 0 5 6.3Z" />
               </svg>
+            </button>
+            <button class="np-ctrl" id="np-lyrics-btn" type="button" title="歌词（L）" aria-label="歌词"
+              aria-pressed="false">
+              <span class="np-lyrics-glyph" aria-hidden="true">词</span>
             </button>
             <button class="np-ctrl np-queue-btn" id="np-queue-btn" type="button" title="播放队列（Q）" aria-label="播放队列"
               aria-expanded="true" aria-controls="np-queue-rail" data-queue-toggle>
@@ -717,6 +779,35 @@
               </div>
             </div>
 
+            <div class="settings-group">
+              <div class="settings-group-head">
+                <h3>歌词</h3>
+                <span>仅保存在本机</span>
+              </div>
+              <div class="settings-card">
+                <div class="setting-row">
+                  <div class="setting-copy">
+                    <div class="setting-title">在线歌词</div>
+                    <div class="setting-desc">允许向 LRCLIB 查询同步歌词，只发送清洗后的歌名与歌手。</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="lyrics-online" checked />
+                    <span></span>
+                  </label>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-copy">
+                    <div class="setting-title">B 站字幕</div>
+                    <div class="setting-desc">允许读取视频自带的人工 / AI 字幕作为歌词。</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="lyrics-bili" checked />
+                    <span></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
             <div class="settings-tip">
               <span class="settings-tip-icon">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></svg>
@@ -909,6 +1000,8 @@
                 <div class="shortcut-row"><span>随机播放</span><kbd>S</kbd></div>
                 <div class="shortcut-row"><span>播放详情 / 返回</span><span><kbd>F</kbd><kbd>Esc</kbd></span></div>
                 <div class="shortcut-row"><span>播放队列</span><kbd>Q</kbd></div>
+                <div class="shortcut-row"><span>歌词视图</span><kbd>L</kbd></div>
+                <div class="shortcut-row"><span>歌词偏移 ±0.5 秒</span><span><kbd>[</kbd><kbd>]</kbd></span></div>
               </div>
             </div>
 
