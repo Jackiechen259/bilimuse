@@ -1,5 +1,6 @@
 package com.bilimuse.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -82,9 +83,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
+import com.bilimuse.app.LyricsUiState
 import com.bilimuse.app.R
 import com.bilimuse.app.ShufflePoolState
 import com.bilimuse.app.btr.EngineSnapshot
+import com.bilimuse.app.data.LyricsCandidate
+import com.bilimuse.app.data.LyricsMatch
+import com.bilimuse.app.data.LyricsSourceOption
 import com.bilimuse.app.player.PlayQueueUiState
 import com.bilimuse.app.player.PlayerUiState
 import kotlinx.coroutines.delay
@@ -97,6 +102,7 @@ fun NowPlayingScreen(
     queue: PlayQueueUiState,
     showBtrDetails: Boolean,
     shufflePool: ShufflePoolState,
+    lyrics: LyricsUiState,
     onBack: () -> Unit,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
@@ -106,11 +112,23 @@ fun NowPlayingScreen(
     onShuffle: (Boolean) -> Unit,
     onPlayQueueIndex: (Int) -> Unit,
     onLoadMoreQueue: () -> Unit,
+    onToggleLyrics: () -> Unit,
+    onLyricsOffset: (Long) -> Unit,
+    onImportLyrics: () -> Unit,
+    onReloadLyrics: () -> Unit,
+    onCloseLyrics: () -> Unit,
+    onLoadLyricsSources: suspend () -> List<LyricsSourceOption>,
+    onSelectLyricsSource: (LyricsSourceOption) -> Unit,
+    onSearchLyrics: suspend (String) -> List<LyricsCandidate>,
+    onUseLyricsCandidate: (LyricsCandidate) -> Unit,
 ) {
     val motion = LocalMotion.current
     var queueOpen by rememberSaveable { mutableStateOf(false) }
     val accent = rememberCoverAccent(state.cover)
     val tilt = rememberCoverTilt(enabled = state.isPlaying)
+
+    // 歌词打开时系统返回键先收起歌词，而不是直接退出播放页。
+    BackHandler(enabled = lyrics.open) { onCloseLyrics() }
 
     Box(
         Modifier
@@ -137,26 +155,81 @@ fun NowPlayingScreen(
                 state = state,
                 queue = queue,
                 accent = accent.color,
+                lyricsOpen = lyrics.open,
                 onBack = onBack,
                 onOpenQueue = { queueOpen = true },
+                onToggleLyrics = onToggleLyrics,
             )
 
             Spacer(Modifier.height(16.dp))
 
-            CoverHero(
-                cover = state.cover,
-                accent = accent,
-                tilt = tilt,
-                modifier = Modifier
-                    .fillMaxWidth(0.82f)
-                    .widthIn(max = 360.dp)
-                    .aspectRatio(1f)
-                    .staggerIn(index = 1, distance = 18.dp, scaleFrom = 0.93f),
-            )
+            AnimatedContent(
+                targetState = lyrics.open,
+                transitionSpec = {
+                    (fadeIn(motion.tween(MotionTokens.Base, easing = MotionEase.OutExpo)) + scaleIn(
+                        initialScale = 0.985f,
+                        animationSpec = motion.tween(280, easing = MotionEase.OutQuart),
+                    )).togetherWith(
+                        fadeOut(motion.tween(MotionTokens.Fast)) + scaleOut(
+                            targetScale = 0.99f,
+                            animationSpec = motion.tween(200, easing = MotionEase.In),
+                        ),
+                    )
+                },
+                contentAlignment = Alignment.TopCenter,
+                label = "lyrics-swap",
+                modifier = Modifier.fillMaxWidth(),
+            ) { lyricsOpen ->
+                if (lyricsOpen) {
+                    LyricsPanel(
+                        result = lyrics.result,
+                        loading = lyrics.loading,
+                        error = lyrics.error,
+                        positionMs = state.positionMs,
+                        searchSeed = remember(state.title, state.upper) {
+                            // 与网页版一致：搜索框预填清洗后的「歌名 歌手」。
+                            LyricsMatch.searchQuery(state.title, state.upper)
+                        },
+                        resetKey = state.bvid,
+                        onSeek = onSeek,
+                        onOffset = onLyricsOffset,
+                        onImport = onImportLyrics,
+                        onReload = onReloadLyrics,
+                        onClose = onCloseLyrics,
+                        onLoadSources = onLoadLyricsSources,
+                        onSelectSource = onSelectLyricsSource,
+                        onSearch = onSearchLyrics,
+                        onUseCandidate = onUseLyricsCandidate,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(360.dp)
+                            .staggerIn(index = 1, distance = 14.dp),
+                    )
+                } else {
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        CoverHero(
+                            cover = state.cover,
+                            accent = accent,
+                            tilt = tilt,
+                            modifier = Modifier
+                                .fillMaxWidth(0.82f)
+                                .widthIn(max = 360.dp)
+                                .aspectRatio(1f)
+                                .staggerIn(index = 1, distance = 18.dp, scaleFrom = 0.93f),
+                        )
 
-            Spacer(Modifier.height(24.dp))
+                        Spacer(Modifier.height(24.dp))
 
-            TrackTitles(state = state, modifier = Modifier.staggerIn(index = 2, distance = 12.dp))
+                        TrackTitles(
+                            state = state,
+                            modifier = Modifier.staggerIn(index = 2, distance = 12.dp),
+                        )
+                    }
+                }
+            }
 
             Spacer(Modifier.height(18.dp))
 
@@ -243,8 +316,10 @@ private fun NowPlayingTopBar(
     state: PlayerUiState,
     queue: PlayQueueUiState,
     accent: Color,
+    lyricsOpen: Boolean,
     onBack: () -> Unit,
     onOpenQueue: () -> Unit,
+    onToggleLyrics: () -> Unit,
 ) {
     val motion = LocalMotion.current
     val quality = state.info?.quality.orEmpty()
@@ -276,6 +351,11 @@ private fun NowPlayingTopBar(
             modifier = Modifier.align(Alignment.CenterEnd),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            LyricsToggleButton(
+                active = lyricsOpen,
+                accent = accent,
+                onClick = onToggleLyrics,
+            )
             AnimatedVisibility(
                 visible = quality.isNotBlank(),
                 enter = fadeIn(motion.tween(180)) + scaleIn(
@@ -303,6 +383,47 @@ private fun NowPlayingTopBar(
                     tint = if (queue.items.isNotEmpty()) BiliText else BiliMuted.copy(alpha = 0.35f),
                 )
             }
+        }
+    }
+}
+
+/** 顶栏「词」开关：打开时主色描边高亮，和网页版 `#np-lyrics-btn` 的 aria-pressed 一致。 */
+@Composable
+private fun LyricsToggleButton(
+    active: Boolean,
+    accent: Color,
+    onClick: () -> Unit,
+) {
+    val motion = LocalMotion.current
+    val background by animateColorAsState(
+        targetValue = if (active) accent.copy(alpha = 0.16f) else Color.Transparent,
+        animationSpec = motion.tween(200),
+        label = "lyrics-toggle-bg",
+    )
+    val tint by animateColorAsState(
+        targetValue = if (active) accent else BiliMuted,
+        animationSpec = motion.tween(200),
+        label = "lyrics-toggle-tint",
+    )
+    MotionIconButton(
+        onClick = onClick,
+        contentDescription = "歌词",
+        tint = tint,
+        modifier = Modifier.size(44.dp),
+    ) {
+        Box(
+            Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(background),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "词",
+                color = tint,
+                fontSize = 15.sp,
+                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+            )
         }
     }
 }

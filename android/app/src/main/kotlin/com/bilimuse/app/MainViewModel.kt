@@ -12,6 +12,10 @@ import com.bilimuse.app.data.FULL_PAGE_GAP_MS
 import com.bilimuse.app.data.FULL_PAGE_SIZE
 import com.bilimuse.app.data.Folder
 import com.bilimuse.app.data.FolderPage
+import com.bilimuse.app.data.LyricsCandidate
+import com.bilimuse.app.data.LyricsRepository
+import com.bilimuse.app.data.LyricsResult
+import com.bilimuse.app.data.LyricsSourceOption
 import com.bilimuse.app.data.NotLoggedInException
 import com.bilimuse.app.data.QrInfo
 import com.bilimuse.app.data.QrPollResult
@@ -78,6 +82,20 @@ data class ShufflePoolState(
     val error: String? = null,
 )
 
+/**
+ * 歌词视图状态。
+ *
+ * 只有 [open] 为 true 时才允许发起解析；[result] 为空且 [loading] 为 false 时，界面按
+ * [LyricsResult.reason]（`not_found` / `disabled` / ...）显示对应空状态。
+ * [error] 只放「解析本身失败」的可展示文案，例如没有正在播放的曲目。
+ */
+data class LyricsUiState(
+    val open: Boolean = false,
+    val loading: Boolean = false,
+    val result: LyricsResult? = null,
+    val error: String = "",
+)
+
 /** 播放队列对应的收藏夹视图（收藏夹 + 搜索词），用于判断随机池是否同一批内容。 */
 private data class QueueSource(
     val folderId: Long,
@@ -114,6 +132,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val player = PlayerController(app, registry, viewModelScope)
     val playerState: StateFlow<PlayerUiState> = player.state
     val settings: StateFlow<EngineSettings> = settingsStore.settings
+
+    /**
+     * 歌词数据层：与播放链路完全独立。只有歌词视图打开时才调用 [LyricsRepository.resolve]，
+     * 断网 / 超时 / 接口变化都只退化成空状态，不影响播放。
+     */
+    private val lyricsRepository = LyricsRepository(
+        app,
+        bili,
+        { settingsStore.settings.value },
+    )
+
+    private val _lyrics = MutableStateFlow(LyricsUiState())
+    val lyrics: StateFlow<LyricsUiState> = _lyrics.asStateFlow()
+
+    /** 当前这一轮歌词解析；关闭视图或切歌时取消，避免迟到结果覆盖新曲目。 */
+    private var lyricsJob: Job? = null
+
+    /** 自增 token：和 bvid 一起校验，迟到的解析结果直接丢弃。 */
+    private var lyricsToken = 0L
 
     private val _library = MutableStateFlow(LibraryUiState())
     val library: StateFlow<LibraryUiState> = _library.asStateFlow()
@@ -199,6 +236,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // 让收藏夹先出首屏，再在后台静默问一次 GitHub。
             delay(2_500)
             autoCheckForUpdates()
+        }
+        // 歌词视图打开时才跟随切歌重载；只监听 bvid，500ms 的进度 tick 不参与。
+        viewModelScope.launch {
+            player.state
+                .map { it.bvid }
+                .distinctUntilChanged()
+                .collect { bvid ->
+                    if (!_lyrics.value.open) return@collect
+                    if (bvid.isEmpty()) {
+                        lyricsJob?.cancel()
+                        lyricsJob = null
+                        lyricsToken += 1
+                        _lyrics.update {
+                            it.copy(loading = false, result = null, error = "没有正在播放的曲目")
+                        }
+                    } else {
+                        startLyricsLoad(refresh = false)
+                    }
+                }
         }
     }
 
@@ -875,6 +931,274 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setMotionEnabled(enabled: Boolean) {
         settingsStore.setMotionEnabled(enabled)
+    }
+
+    /** 在线匹配歌词（LRCLIB）开关；改动后若歌词正开着，按新设置重新解析一次。 */
+    fun setLyricsOnline(enabled: Boolean) {
+        if (settingsStore.settings.value.lyricsOnline == enabled) return
+        settingsStore.setLyricsOnline(enabled)
+        if (_lyrics.value.open) startLyricsLoad(refresh = true)
+    }
+
+    /** 读取 B 站字幕开关；同样只影响之后的歌词解析，不碰播放链路。 */
+    fun setLyricsBili(enabled: Boolean) {
+        if (settingsStore.settings.value.lyricsBili == enabled) return
+        settingsStore.setLyricsBili(enabled)
+        if (_lyrics.value.open) startLyricsLoad(refresh = true)
+    }
+
+    // ------------------------------------------------------------------ 歌词
+
+    /** 顶栏「词」按钮：打开 / 收起歌词视图。 */
+    fun toggleLyrics() {
+        if (_lyrics.value.open) closeLyrics() else openLyrics()
+    }
+
+    /** 打开歌词视图后才发起解析，未打开时一个歌词请求都不发。 */
+    fun openLyrics() {
+        if (_lyrics.value.open) return
+        _lyrics.update { it.copy(open = true) }
+        startLyricsLoad(refresh = false)
+    }
+
+    fun closeLyrics() {
+        lyricsJob?.cancel()
+        lyricsJob = null
+        lyricsToken += 1
+        _lyrics.update { it.copy(open = false, loading = false, error = "") }
+    }
+
+    /** 「重试」：绕过抓取缓存重新解析（只清缓存，不动本地 LRC 与偏移偏好）。 */
+    fun reloadLyrics() {
+        if (!_lyrics.value.open) return
+        startLyricsLoad(refresh = true)
+    }
+
+    /**
+     * 解析当前曲目的歌词。
+     *
+     * [refresh] 为 true 时绕过抓取缓存（重试按钮 / 修改歌词来源设置后使用）。
+     * 迟到结果按 bvid + 自增 token 丢弃；切歌或关闭视图时取消进行中的协程。
+     */
+    private fun startLyricsLoad(refresh: Boolean) {
+        val snapshot = playerState.value
+        val bvid = snapshot.bvid
+        lyricsJob?.cancel()
+        lyricsJob = null
+        val token = ++lyricsToken
+        if (bvid.isEmpty()) {
+            _lyrics.update { it.copy(loading = false, result = null, error = "没有正在播放的曲目") }
+            return
+        }
+        _lyrics.update { it.copy(loading = true, result = null, error = "") }
+        lyricsJob = viewModelScope.launch {
+            val result = try {
+                lyricsRepository.resolve(
+                    bvid = bvid,
+                    title = snapshot.title,
+                    upper = snapshot.upper,
+                    durationSec = (snapshot.durationMs / 1000L).toInt(),
+                    refresh = refresh,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            // 只接受当前这首歌、当前这一轮请求的结果；切歌 / 关闭视图后的迟到回包直接丢弃。
+            if (token != lyricsToken || !_lyrics.value.open || playerState.value.bvid != bvid) {
+                return@launch
+            }
+            if (result == null) {
+                _lyrics.update {
+                    it.copy(loading = false, result = null, error = "歌词解析失败，请稍后重试")
+                }
+            } else {
+                _lyrics.update { it.copy(loading = false, result = result, error = "") }
+            }
+        }
+    }
+
+    /** 换源菜单：读取各来源可用性（只读，不写偏好）。网络失败退化成空列表。 */
+    suspend fun lyricsSources(): List<LyricsSourceOption> {
+        val snapshot = playerState.value
+        if (snapshot.bvid.isEmpty()) return emptyList()
+        return try {
+            lyricsRepository.sources(
+                bvid = snapshot.bvid,
+                title = snapshot.title,
+                upper = snapshot.upper,
+                durationSec = (snapshot.durationMs / 1000L).toInt(),
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /** LRCLIB 歌词搜索（最多 10 条）；关闭在线来源时仓库直接返回空列表。 */
+    suspend fun searchLyrics(query: String): List<LyricsCandidate> {
+        val keyword = query.trim()
+        if (keyword.isEmpty()) return emptyList()
+        return try {
+            lyricsRepository.search(keyword)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * 采用某条搜索结果的 LRCLIB 候选：仓库会写入 `pinSource=lrclib` 并锁定该 id，
+     * 之后这首歌（包括切歌回来）都会优先用这条歌词。
+     */
+    fun useLyricsCandidate(candidate: LyricsCandidate) {
+        val snapshot = playerState.value
+        val bvid = snapshot.bvid
+        if (bvid.isEmpty()) return
+        val token = beginLyricsLoad()
+        lyricsJob = viewModelScope.launch {
+            val result = try {
+                lyricsRepository.useCandidate(bvid, candidate.id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            finishLyricsLoad(token, bvid, result)
+        }
+    }
+
+    /**
+     * 换源：写 `pinSource` 偏好后强制重解析（必须绕过抓取缓存，缓存命中会排在 pin 之前）。
+     *
+     * - `lrclib` 有候选 id 时走 [LyricsRepository.useCandidate]（内部会写 pin 并缓存）；
+     * - `bili` 用 [LyricsRepository.setPin] 锁来源（人工优先、AI 兜底）；
+     * - `local` / `demo` 也写 pin；
+     * - 其它（工具行的「自动」项）传 `null` 回到自动阶梯。
+     */
+    fun selectLyricsSource(option: LyricsSourceOption) {
+        if (!option.available) return
+        val snapshot = playerState.value
+        val bvid = snapshot.bvid
+        if (bvid.isEmpty()) return
+        val token = beginLyricsLoad()
+        lyricsJob = viewModelScope.launch {
+            val result = try {
+                when (option.source) {
+                    LyricsRepository.SOURCE_LRCLIB -> {
+                        val id = option.matched?.id
+                        if (id != null) {
+                            lyricsRepository.useCandidate(bvid, id)
+                        } else {
+                            lyricsRepository.setPin(bvid, null)
+                            resolveLyrics(snapshot, refresh = true)
+                        }
+                    }
+                    LyricsRepository.SOURCE_BILI,
+                    LyricsRepository.SOURCE_LOCAL,
+                    LyricsRepository.SOURCE_DEMO,
+                    -> {
+                        lyricsRepository.setPin(bvid, option.source)
+                        resolveLyrics(snapshot, refresh = true)
+                    }
+                    else -> {
+                        lyricsRepository.setPin(bvid, null)
+                        resolveLyrics(snapshot, refresh = true)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            finishLyricsLoad(token, bvid, result)
+            // B 站字幕只在真的锁上时才生效；没锁住（未登录 / 字幕不足 4 行）给个提示。
+            if (option.source == LyricsRepository.SOURCE_BILI &&
+                result?.source != LyricsRepository.SOURCE_BILI
+            ) {
+                _messages.tryEmit("没能切换到 B 站字幕：未登录或没有可用字幕")
+            }
+        }
+    }
+
+    /** 当前这一轮歌词解析的统一入口：取消旧任务、置 loading、返回 token。 */
+    private fun beginLyricsLoad(): Long {
+        lyricsJob?.cancel()
+        lyricsJob = null
+        val token = ++lyricsToken
+        _lyrics.update { it.copy(loading = true, result = null, error = "") }
+        return token
+    }
+
+    /** 校验 bvid + token 后再落状态；迟到结果直接丢弃。 */
+    private fun finishLyricsLoad(token: Long, bvid: String, result: LyricsResult?) {
+        if (token != lyricsToken || !_lyrics.value.open || playerState.value.bvid != bvid) return
+        if (result == null) {
+            _lyrics.update { it.copy(loading = false, result = null, error = "歌词解析失败，请稍后重试") }
+        } else {
+            _lyrics.update { it.copy(loading = false, result = result, error = "") }
+        }
+    }
+
+    private suspend fun resolveLyrics(snapshot: PlayerUiState, refresh: Boolean): LyricsResult =
+        lyricsRepository.resolve(
+            bvid = snapshot.bvid,
+            title = snapshot.title,
+            upper = snapshot.upper,
+            durationSec = (snapshot.durationMs / 1000L).toInt(),
+            refresh = refresh,
+        )
+
+    /** 偏移步进（±500ms），仅同步歌词可调；范围由数据层 clamp 到 ±30s。 */
+    fun setLyricsOffset(deltaMs: Long) {
+        val result = _lyrics.value.result ?: return
+        if (!result.synced) return
+        val bvid = playerState.value.bvid
+        if (bvid.isEmpty()) return
+        val next = (result.offsetMs + deltaMs)
+            .coerceIn(-LyricsRepository.MAX_OFFSET_MS, LyricsRepository.MAX_OFFSET_MS)
+        if (next == result.offsetMs) return
+        lyricsRepository.setOffset(bvid, next)
+        _lyrics.update { state ->
+            val current = state.result ?: return@update state
+            state.copy(result = current.copy(offsetMs = next))
+        }
+    }
+
+    /**
+     * 导入本地 LRC。文件读取与编码回退在界面层完成，这里只负责落盘与刷新视图；
+     * 失败通过 snackbar 提示，不打断播放。
+     */
+    fun importLyrics(text: String) {
+        val bvid = playerState.value.bvid
+        if (bvid.isEmpty()) {
+            _messages.tryEmit("没有正在播放的曲目，无法导入歌词")
+            return
+        }
+        viewModelScope.launch {
+            val imported = try {
+                lyricsRepository.importLocal(bvid, text)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            if (playerState.value.bvid != bvid) return@launch
+            if (imported == null) {
+                _messages.tryEmit("导入失败：LRC 为空、超过 256 KB 或无法解析")
+                return@launch
+            }
+            lyricsJob?.cancel()
+            lyricsJob = null
+            lyricsToken += 1
+            _lyrics.update {
+                it.copy(loading = false, result = imported, error = "")
+            }
+            _messages.tryEmit("已导入本地歌词")
+        }
     }
 
     // ------------------------------------------------------------------ 自动更新

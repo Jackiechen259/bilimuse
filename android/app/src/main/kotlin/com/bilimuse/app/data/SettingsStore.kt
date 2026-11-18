@@ -20,6 +20,8 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_SHOW_BTR_DETAILS, next.showBtrDetails)
             .putBoolean(KEY_MOTION, next.motionEnabled)
             .putStringSet(KEY_HIDDEN_FOLDERS, next.hiddenFolderIds.map { it.toString() }.toSet())
+            .putBoolean(KEY_LYRICS_ONLINE, next.lyricsOnline)
+            .putBoolean(KEY_LYRICS_BILI, next.lyricsBili)
             .apply()
         _settings.value = next
         return next
@@ -39,6 +41,14 @@ class SettingsStore(context: Context) {
 
     fun setMotionEnabled(enabled: Boolean): EngineSettings =
         update { it.copy(motionEnabled = enabled) }
+
+    /** 允许查询 LRCLIB。 */
+    fun setLyricsOnline(enabled: Boolean): EngineSettings =
+        update { it.copy(lyricsOnline = enabled) }
+
+    /** 允许读取 B 站字幕。 */
+    fun setLyricsBili(enabled: Boolean): EngineSettings =
+        update { it.copy(lyricsBili = enabled) }
 
     fun setFolderHidden(folderId: Long, hidden: Boolean): EngineSettings = update { settings ->
         if (hidden) {
@@ -65,6 +75,8 @@ class SettingsStore(context: Context) {
             .orEmpty()
             .mapNotNull { it.toLongOrNull() }
             .toSet(),
+        lyricsOnline = prefs.getBoolean(KEY_LYRICS_ONLINE, true),
+        lyricsBili = prefs.getBoolean(KEY_LYRICS_BILI, true),
     ).clamp()
 
     private companion object {
@@ -76,5 +88,7 @@ class SettingsStore(context: Context) {
         const val KEY_SHOW_BTR_DETAILS = "show_btr_details"
         const val KEY_MOTION = "motion_enabled"
         const val KEY_HIDDEN_FOLDERS = "hidden_folders"
+        const val KEY_LYRICS_ONLINE = "lyrics_online"
+        const val KEY_LYRICS_BILI = "lyrics_bili"
     }
 }

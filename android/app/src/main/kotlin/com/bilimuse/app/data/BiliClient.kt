@@ -29,7 +29,9 @@ import java.util.concurrent.TimeUnit
 class BiliClient(
     private val sessionSink: SessionSink,
     private val httpClient: OkHttpClient = defaultHttpClient(),
-) {
+    /** API 根地址；JVM 单测里指向 MockWebServer，生产环境用 [API]。 */
+    private val apiBase: String = API,
+) : LyricsBiliSource {
     private val lock = Any()
     private val cookies = LinkedHashMap<String, String>()
     private var current: SessionData = sessionSink.load()
@@ -43,7 +45,7 @@ class BiliClient(
     val session: SessionData
         get() = synchronized(lock) { current }
 
-    val loggedIn: Boolean
+    override val loggedIn: Boolean
         get() = synchronized(lock) {
             cookies["SESSDATA"].orEmpty().isNotEmpty() && current.mid > 0
         }
@@ -139,7 +141,7 @@ class BiliClient(
     }
 
     suspend fun refreshProfile(): UserInfo {
-        val data = requestData("$API/x/web-interface/nav").asObjectOrNull()
+        val data = requestData("$apiBase/x/web-interface/nav").asObjectOrNull()
             ?: JsonObject(emptyMap())
         if (data["isLogin"].asBooleanOrNull() != true) throw NotLoggedInException()
         val vip = data["vipStatus"].asIntOrNull() == 1 ||
@@ -263,7 +265,7 @@ class BiliClient(
         if (session.mid <= 0L) refreshProfile()
         val mid = session.mid
         val data = requestData(
-            "$API/x/v3/fav/folder/created/list-all",
+            "$apiBase/x/v3/fav/folder/created/list-all",
             mapOf("up_mid" to mid.toString(), "web_location" to "333.1387"),
             needLogin = true,
         ).asObjectOrNull()
@@ -298,7 +300,7 @@ class BiliClient(
         )
         if (keyword.isNotEmpty()) params["keyword"] = keyword
         val data = requestData(
-            "$API/x/v3/fav/resource/list",
+            "$apiBase/x/v3/fav/resource/list",
             params,
             needLogin = true,
         ).asObjectOrNull() ?: return FolderPage(title = title)
@@ -332,8 +334,8 @@ class BiliClient(
 
     // ---------------------------------------------------------------- 取流
 
-    suspend fun pageInfo(bvid: String): PageInfo {
-        val data = requestData("$API/x/player/pagelist", mapOf("bvid" to bvid))
+    override suspend fun pageInfo(bvid: String): PageInfo {
+        val data = requestData("$apiBase/x/player/pagelist", mapOf("bvid" to bvid))
         val pages = when (data) {
             is JsonArray -> data
             is JsonObject -> data["page"].asArrayOrNull()
@@ -362,16 +364,16 @@ class BiliClient(
             val (img, sub) = wbiKeys()
             if (img.isEmpty() || sub.isEmpty()) throw BiliException(-1, "WBI 密钥不可用")
             val signed = Wbi.sign(params, img, sub)
-            requestData("$API/x/player/wbi/playurl", signed).asObjectOrNull()
+            requestData("$apiBase/x/player/wbi/playurl", signed).asObjectOrNull()
                 ?: JsonObject(emptyMap())
         } catch (e: IOException) {
-            requestData("$API/x/player/playurl", params).asObjectOrNull()
+            requestData("$apiBase/x/player/playurl", params).asObjectOrNull()
                 ?: JsonObject(emptyMap())
         }
     }
 
     private suspend fun wbiKeys(): Pair<String, String> {
-        val data = requestData("$API/x/web-interface/nav").asObjectOrNull()
+        val data = requestData("$apiBase/x/web-interface/nav").asObjectOrNull()
             ?: return "" to ""
         val wbi = data["wbi_img"].asObjectOrNull() ?: return "" to ""
         val img = wbi["img_url"].asStringOrNull().orEmpty()
@@ -385,11 +387,68 @@ class BiliClient(
     private suspend fun ensureBuvid() {
         if (hasCookie("buvid3")) return
         try {
-            val data = requestData("$API/x/frontend/finger/spi").asObjectOrNull()
+            val data = requestData("$apiBase/x/frontend/finger/spi").asObjectOrNull()
             data?.get("b_3").asStringOrNull()?.let { putCookie("buvid3", it) }
             data?.get("b_4").asStringOrNull()?.let { putCookie("buvid4", it) }
         } catch (e: IOException) {
             // buvid 只是锦上添花，失败不影响主流程
+        }
+    }
+
+    // ---------------------------------------------------------------- 字幕
+
+    /**
+     * 某个分P的字幕轨列表：人工字幕在前，其次 `ai-zh`，最后其它 AI 字幕。
+     *
+     * 接口报错 / 未登录一律抛 [BiliException]，由歌词仓库当作「这个源不可用」降级。
+     * 返回的 `url` 已经过白名单校验并补全成绝对 https 地址。
+     */
+    override suspend fun subtitleTracks(bvid: String, cid: Long): List<SubtitleTrack> {
+        val data = requestData(
+            "$apiBase/x/player/v2",
+            mapOf("bvid" to bvid, "cid" to cid.toString()),
+        ).asObjectOrNull() ?: return emptyList()
+        val subtitles = data["subtitle"].asObjectOrNull()
+            ?.get("subtitles").asArrayOrNull()
+            ?: return emptyList()
+        val tracks = subtitles.mapNotNull { element ->
+            val item = element.asObjectOrNull() ?: return@mapNotNull null
+            val lan = item["lan"].asStringOrNull().orEmpty()
+            val url = resolveSubtitleUrl(item["subtitle_url"].asStringOrNull().orEmpty())
+            if (lan.isEmpty() || url == null) return@mapNotNull null
+            SubtitleTrack(
+                lan = lan,
+                lanDoc = item["lan_doc"].asStringOrNull().orEmpty(),
+                url = url,
+                isAi = lan.startsWith("ai-"),
+            )
+        }
+        return tracks.sortedWith(
+            compareBy<SubtitleTrack>({ it.isAi }, { if (it.lan == "ai-zh") 0 else 1 }),
+        )
+    }
+
+    /** 下载并解析字幕 JSON；URL 不在白名单内时直接拒绝，不发任何请求。 */
+    override suspend fun subtitleBody(url: String): JsonObject = withContext(Dispatchers.IO) {
+        val resolved = resolveSubtitleUrl(url)
+            ?: throw BiliException(-1, "字幕地址不受信任")
+        val request = Request.Builder()
+            .url(resolved)
+            .header("User-Agent", UA)
+            .header("Referer", REFERER)
+            .get()
+            .build()
+        val response = try {
+            client.newCall(request).execute()
+        } catch (e: IOException) {
+            if (e is BiliException) throw e
+            throw BiliException(-1, "字幕下载失败，请检查网络后重试")
+        }
+        response.use {
+            if (!it.isSuccessful) throw BiliException(-1, "HTTP ${it.code}")
+            val text = it.body?.string().orEmpty()
+            Json.parseToJsonElement(text) as? JsonObject
+                ?: throw BiliException(-1, "字幕数据格式异常")
         }
     }
 
@@ -415,8 +474,55 @@ class BiliClient(
             url.startsWith("//") -> "https:$url"
             else -> url
         }
+
+        /** 字幕 CDN 白名单后缀。 */
+        private val SUBTITLE_HOST_SUFFIXES = listOf(".hdslb.com", ".bilibili.com", ".bilivideo.com")
+
+        /**
+         * 字幕地址白名单：协议必须是 https，host 必须是 B 站自家域名；
+         * `//host/path` 与 `/path` 这类相对地址按 `https://www.bilibili.com` 补全。
+         *
+         * 返回补全后的绝对地址；不合法时返回 null（调用方直接拒绝，避免被当成代理）。
+         */
+        fun resolveSubtitleUrl(raw: String): String? {
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty()) return null
+            val absolute = when {
+                trimmed.startsWith("//") -> "https:$trimmed"
+                trimmed.startsWith("https://", ignoreCase = true) -> trimmed
+                trimmed.startsWith("http://", ignoreCase = true) -> return null
+                trimmed.startsWith("/") -> "$REFERER$trimmed"
+                else -> "$REFERER/$trimmed"
+            }
+            val parsed = absolute.toHttpUrlOrNull() ?: return null
+            if (!parsed.scheme.equals("https", ignoreCase = true)) return null
+            val host = parsed.host.lowercase()
+            val allowed = SUBTITLE_HOST_SUFFIXES.any { suffix ->
+                host == suffix.removePrefix(".") || host.endsWith(suffix)
+            }
+            return if (allowed) parsed.toString() else null
+        }
     }
 }
+
+/** 歌词仓库需要的 B 站能力；抽成接口方便 JVM 单测替换实现。 */
+interface LyricsBiliSource {
+    val loggedIn: Boolean
+
+    suspend fun pageInfo(bvid: String): BiliClient.PageInfo
+
+    suspend fun subtitleTracks(bvid: String, cid: Long): List<SubtitleTrack>
+
+    suspend fun subtitleBody(url: String): JsonObject
+}
+
+/** B 站字幕轨。[isAi] 由 `lan` 是否以 `ai-` 开头决定。 */
+data class SubtitleTrack(
+    val lan: String,
+    val lanDoc: String,
+    val url: String,
+    val isAi: Boolean,
+)
 
 // ---------------------------------------------------------------- JSON 小工具
 

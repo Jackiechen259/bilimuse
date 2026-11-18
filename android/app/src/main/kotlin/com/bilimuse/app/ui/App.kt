@@ -1,5 +1,7 @@
 package com.bilimuse.app.ui
 
+import android.content.Context
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,7 +43,11 @@ import com.bilimuse.app.BuildConfig
 import com.bilimuse.app.MainViewModel
 import com.bilimuse.app.data.update.ApkInstaller
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
@@ -49,6 +55,7 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
     val player by viewModel.playerState.collectAsStateWithLifecycle()
     val queue by viewModel.queue.collectAsStateWithLifecycle()
     val shufflePool by viewModel.shufflePool.collectAsStateWithLifecycle()
+    val lyrics by viewModel.lyrics.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val update by viewModel.update.collectAsStateWithLifecycle()
     val autoCheckUpdates by viewModel.autoCheckUpdates.collectAsStateWithLifecycle()
@@ -78,6 +85,24 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
                     "没有安装权限，无法启动安装器",
                     withDismissAction = true,
                 )
+            }
+        }
+    }
+
+    // 导入本地 LRC：只取文本，UTF-8 解码失败退 GBK；取消选择（uri=null）不做事。
+    val lyricsFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val text = withContext(Dispatchers.IO) { readLyricsFile(context, uri) }
+            if (text.isNullOrBlank()) {
+                snackbarHostState.showSnackbar(
+                    "无法读取歌词文件（需小于 256 KB 的 LRC 文本）",
+                    withDismissAction = true,
+                )
+            } else {
+                viewModel.importLyrics(text)
             }
         }
     }
@@ -114,6 +139,10 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
     }
     LaunchedEffect(player.bvid) {
         if (player.bvid.isEmpty()) showPlayer = false
+    }
+    // 详情页关闭后歌词视图也收起，下次进入始终从封面视图开始（与网页版一致）。
+    LaunchedEffect(showPlayer) {
+        if (!showPlayer) viewModel.closeLyrics()
     }
 
     BackHandler(enabled = showPlayer) { showPlayer = false }
@@ -212,7 +241,11 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
                 queue = queue,
                 showBtrDetails = settings.showBtrDetails,
                 shufflePool = shufflePool,
-                onBack = { showPlayer = false },
+                lyrics = lyrics,
+                onBack = {
+                    // 歌词打开时先收起歌词，再按一次才退出播放页（与网页版 Esc 顺序一致）。
+                    if (lyrics.open) viewModel.closeLyrics() else showPlayer = false
+                },
                 onTogglePlay = viewModel::togglePlay,
                 onNext = viewModel::next,
                 onPrevious = viewModel::previous,
@@ -221,6 +254,19 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
                 onShuffle = viewModel::setShuffle,
                 onPlayQueueIndex = viewModel::playQueueItem,
                 onLoadMoreQueue = viewModel::loadMoreQueue,
+                onToggleLyrics = viewModel::toggleLyrics,
+                onLyricsOffset = viewModel::setLyricsOffset,
+                onImportLyrics = {
+                    lyricsFileLauncher.launch(
+                        arrayOf("text/plain", "application/octet-stream", "*/*"),
+                    )
+                },
+                onReloadLyrics = viewModel::reloadLyrics,
+                onCloseLyrics = viewModel::closeLyrics,
+                onLoadLyricsSources = { viewModel.lyricsSources() },
+                onSelectLyricsSource = viewModel::selectLyricsSource,
+                onSearchLyrics = { query -> viewModel.searchLyrics(query) },
+                onUseLyricsCandidate = viewModel::useLyricsCandidate,
             )
         }
 
@@ -303,6 +349,8 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
             onLossless = viewModel::setPreferLossless,
             onShowBtrDetails = viewModel::setShowBtrDetails,
             onMotionEnabled = viewModel::setMotionEnabled,
+            onLyricsOnline = viewModel::setLyricsOnline,
+            onLyricsBili = viewModel::setLyricsBili,
             onAutoCheckUpdates = viewModel::setAutoCheckUpdates,
             onCheckUpdate = viewModel::checkForUpdates,
             onOpenUpdate = {
@@ -323,4 +371,44 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
             onOpenReleasePage = { url -> ApkInstaller.openUrl(context, url) },
         )
     }
+}
+
+/** 导入歌词的上限：与 `docs/LYRICS.md` 的 256 KB 一致。 */
+private const val LYRICS_IMPORT_MAX_BYTES = 256 * 1024
+
+/**
+ * 读取用户选择的歌词文件。
+ *
+ * 先按 UTF-8 严格解码（同时吃掉 BOM），失败回退 GBK；超过 256 KB 或内容为空返回 null。
+ * 解析规则由数据层（[com.bilimuse.app.data.LyricsLrc]）负责，这里只把文本交出去。
+ */
+private fun readLyricsFile(context: Context, uri: Uri): String? {
+    val bytes = runCatching {
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            val buffer = ByteArray(LYRICS_IMPORT_MAX_BYTES + 1)
+            var total = 0
+            while (total < buffer.size) {
+                val read = stream.read(buffer, total, buffer.size - total)
+                if (read <= 0) break
+                total += read
+            }
+            if (total > LYRICS_IMPORT_MAX_BYTES) null else buffer.copyOf(total)
+        }
+    }.getOrNull() ?: return null
+    if (bytes.isEmpty()) return null
+    return decodeLyricsText(bytes)
+}
+
+private fun decodeLyricsText(bytes: ByteArray): String {
+    val utf8 = runCatching {
+        Charsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(bytes))
+            .toString()
+            .removePrefix("\uFEFF")
+    }.getOrNull()
+    if (utf8 != null) return utf8
+    return runCatching { String(bytes, charset("GBK")) }
+        .getOrElse { String(bytes, Charsets.UTF_8) }
 }

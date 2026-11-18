@@ -71,6 +71,8 @@ fun SettingsSheet(
     onLossless: (Boolean) -> Unit,
     onShowBtrDetails: (Boolean) -> Unit,
     onMotionEnabled: (Boolean) -> Unit,
+    onLyricsOnline: (Boolean) -> Unit,
+    onLyricsBili: (Boolean) -> Unit,
     onAutoCheckUpdates: (Boolean) -> Unit,
     onCheckUpdate: () -> Unit,
     onOpenUpdate: () -> Unit,
@@ -213,6 +215,24 @@ fun SettingsSheet(
                 description = "关闭后播放页隐藏引擎与分块卡片",
                 checked = settings.showBtrDetails,
                 onCheckedChange = onShowBtrDetails,
+            )
+
+            Spacer(Modifier.height(22.dp))
+            SectionTitle("歌词")
+
+            SettingSwitch(
+                title = "在线匹配歌词",
+                description = "通过 LRCLIB 匹配带时间轴的歌词；关闭后只用本地歌词",
+                checked = settings.lyricsOnline,
+                onCheckedChange = onLyricsOnline,
+            )
+
+            Spacer(Modifier.height(8.dp))
+            SettingSwitch(
+                title = "读取 B 站字幕",
+                description = "使用 UP 主字幕或 AI 转写作为歌词来源",
+                checked = settings.lyricsBili,
+                onCheckedChange = onLyricsBili,
             )
 
             Spacer(Modifier.height(22.dp))

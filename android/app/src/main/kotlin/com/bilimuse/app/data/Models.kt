@@ -97,6 +97,10 @@ data class EngineSettings(
     val motionEnabled: Boolean = true,
     /** 本机选择隐藏的收藏夹；新收藏夹默认可见。 */
     val hiddenFolderIds: Set<Long> = emptySet(),
+    /** 允许查询 LRCLIB（歌词在线来源）。关闭后本地 LRC 与演示歌词不受影响。 */
+    val lyricsOnline: Boolean = true,
+    /** 允许读取 B 站字幕（人工与 AI 转写）。 */
+    val lyricsBili: Boolean = true,
 ) {
     fun clamp(): EngineSettings = copy(
         concurrency = concurrency.coerceIn(1, 64),
