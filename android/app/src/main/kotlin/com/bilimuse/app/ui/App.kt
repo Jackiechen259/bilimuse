@@ -157,22 +157,16 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
                             snackbarData = data,
                             containerColor = BiliPanel2,
                             contentColor = BiliText,
-                            actionColor = BiliPink,
-                            shape = RoundedCornerShape(12.dp),
+                            actionColor = BiliPinkText,
+                            shape = RoundedCornerShape(2.dp),
                         )
                     }
                 },
                 bottomBar = {
                     AnimatedVisibility(
                         visible = player.bvid.isNotEmpty(),
-                        enter = slideInVertically(
-                            initialOffsetY = { it },
-                            animationSpec = motion.spring(dampingRatio = 0.82f, stiffness = 320f),
-                        ) + fadeIn(motion.tween(MotionTokens.Base)),
-                        exit = slideOutVertically(
-                            targetOffsetY = { it },
-                            animationSpec = motion.tween(220, easing = MotionEase.In),
-                        ) + fadeOut(motion.tween(180)),
+                        enter = fadeIn(motion.tween(MotionTokens.Fast)),
+                        exit = fadeOut(motion.tween(MotionTokens.Fast)),
                     ) {
                         MiniPlayer(
                             state = player,
@@ -220,21 +214,9 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
         AnimatedVisibility(
             visible = showPlayer && player.bvid.isNotEmpty(),
             modifier = Modifier.zIndex(2f),
-            // 整页从下方轻轻托起，细节（封面 / 标题 / 走带 / 引擎）由页内错峰入场接着演。
-            enter = slideInVertically(
-                initialOffsetY = { it / 12 },
-                animationSpec = motion.spring(dampingRatio = 0.86f, stiffness = 300f),
-            ) + fadeIn(motion.tween(220)) + scaleIn(
-                initialScale = 0.97f,
-                animationSpec = motion.spring(dampingRatio = 0.9f, stiffness = 260f),
-            ),
-            exit = slideOutVertically(
-                targetOffsetY = { it / 14 },
-                animationSpec = motion.tween(260, easing = MotionEase.In),
-            ) + fadeOut(motion.tween(200)) + scaleOut(
-                targetScale = 0.985f,
-                animationSpec = motion.tween(260, easing = MotionEase.In),
-            ),
+            // 整页只做一次淡入，避免布局位移与缩放。
+            enter = fadeIn(motion.tween(MotionTokens.Base)),
+            exit = fadeOut(motion.tween(MotionTokens.Fast)),
         ) {
             NowPlayingScreen(
                 state = player,
@@ -348,6 +330,8 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
             onChunkSize = viewModel::setChunkSize,
             onLossless = viewModel::setPreferLossless,
             onShowBtrDetails = viewModel::setShowBtrDetails,
+            theme = AppTheme.fromKey(settings.theme),
+            onTheme = viewModel::setTheme,
             onMotionEnabled = viewModel::setMotionEnabled,
             onLyricsOnline = viewModel::setLyricsOnline,
             onLyricsBili = viewModel::setLyricsBili,

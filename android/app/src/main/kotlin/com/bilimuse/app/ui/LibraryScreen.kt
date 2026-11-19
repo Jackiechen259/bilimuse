@@ -138,14 +138,8 @@ fun LibraryScreen(
 
         AnimatedVisibility(
             visible = searchOpen,
-            enter = expandVertically(
-                expandFrom = Alignment.Top,
-                animationSpec = motion.spring(dampingRatio = 0.9f, stiffness = 320f),
-            ) + fadeIn(motion.tween(180)),
-            exit = shrinkVertically(
-                shrinkTowards = Alignment.Top,
-                animationSpec = motion.tween(220, easing = MotionEase.InOut),
-            ) + fadeOut(motion.tween(140)),
+            enter = fadeIn(motion.tween(MotionTokens.Fast)),
+            exit = fadeOut(motion.tween(MotionTokens.Fast)),
         ) {
             OutlinedTextField(
                 value = state.search,
@@ -156,21 +150,15 @@ fun LibraryScreen(
                     .focusRequester(focusRequester),
                 placeholder = { Text("在收藏夹内搜索…", color = BiliMuted) },
                 singleLine = true,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(2.dp),
                 leadingIcon = {
                     Icon(Icons.Filled.Search, contentDescription = null, tint = BiliMuted)
                 },
                 trailingIcon = {
                     AnimatedVisibility(
                         visible = state.search.isNotEmpty(),
-                        enter = fadeIn(motion.tween(140)) + scaleIn(
-                            initialScale = 0.7f,
-                            animationSpec = motion.spring(dampingRatio = 0.6f, stiffness = 700f),
-                        ),
-                        exit = fadeOut(motion.tween(100)) + scaleOut(
-                            targetScale = 0.7f,
-                            animationSpec = motion.tween(120, easing = MotionEase.In),
-                        ),
+                        enter = fadeIn(motion.tween(MotionTokens.Fast)),
+                        exit = fadeOut(motion.tween(MotionTokens.Fast)),
                     ) {
                         IconButton(onClick = { onSearchChange("") }) {
                             Icon(Icons.Filled.Clear, contentDescription = "清空", tint = BiliMuted)
@@ -180,11 +168,11 @@ fun LibraryScreen(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = BiliPink.copy(alpha = 0.6f),
+                    focusedBorderColor = BiliPinkStrong,
                     unfocusedBorderColor = BiliLine,
                     focusedContainerColor = BiliPanel,
                     unfocusedContainerColor = BiliPanel,
-                    cursorColor = BiliPink,
+                    cursorColor = BiliPinkStrong,
                 ),
             )
         }
@@ -264,19 +252,13 @@ private fun LibraryTopBar(
         MotionIconButton(
             onClick = onSearchToggle,
             contentDescription = if (searchOpen) "关闭搜索" else "搜索",
-            tint = if (searchOpen) BiliPink else BiliText,
+            tint = if (searchOpen) BiliPinkText else BiliText,
         ) {
             AnimatedContent(
                 targetState = searchOpen,
                 transitionSpec = {
-                    (fadeIn(motion.tween(160)) + scaleIn(
-                        initialScale = 0.65f,
-                        animationSpec = motion.spring(dampingRatio = 0.6f, stiffness = 700f),
-                    )).togetherWith(
-                        fadeOut(motion.tween(110)) + scaleOut(
-                            targetScale = 0.65f,
-                            animationSpec = motion.tween(120, easing = MotionEase.In),
-                        ),
+                    fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
+                        fadeOut(motion.tween(MotionTokens.Fast)),
                     )
                 },
                 label = "search-glyph",
@@ -284,7 +266,7 @@ private fun LibraryTopBar(
                 Icon(
                     imageVector = if (open) Icons.Filled.Close else Icons.Filled.Search,
                     contentDescription = null,
-                    tint = if (open) BiliPink else BiliText,
+                    tint = if (open) BiliPinkText else BiliText,
                 )
             }
         }
@@ -307,16 +289,11 @@ private fun AccountAvatar(user: UserInfo, demo: Boolean, onClick: () -> Unit) {
             .padding(start = 2.dp, end = 4.dp)
             .size(36.dp)
             .pressScale(interactionSource, pressedScale = 0.88f)
-            .clip(CircleShape)
-            .background(
-                if (demo) CoverFallbackBrush
-                else androidx.compose.ui.graphics.Brush.linearGradient(
-                    listOf(Color(0xFF2B3242), Color(0xFF1A1F2B)),
-                ),
-            )
+            .clip(RoundedCornerShape(2.dp))
+            .background(if (demo) BiliPink else BiliPanel2)
             .clickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 onClick = onClick,
             ),
         contentAlignment = Alignment.Center,
@@ -353,61 +330,61 @@ private fun FolderChips(
             val selected = folder.id == selectedId
             val interactionSource = remember { MutableInteractionSource() }
             val container by animateColorAsState(
-                targetValue = if (selected) BiliPink.copy(alpha = 0.16f) else BiliPanel,
-                animationSpec = motion.tween(220),
+                targetValue = if (selected) BiliSelected else BiliPanel,
+                animationSpec = motion.tween(MotionTokens.Fast),
                 label = "chip-container",
             )
             val borderColor by animateColorAsState(
-                targetValue = if (selected) BiliPink.copy(alpha = 0.5f) else BiliLine,
-                animationSpec = motion.tween(220),
+                targetValue = BiliLine,
+                animationSpec = motion.tween(MotionTokens.Fast),
                 label = "chip-border",
             )
             val labelColor by animateColorAsState(
-                targetValue = if (selected) BiliPink else BiliText,
-                animationSpec = motion.tween(220),
+                targetValue = if (selected) BiliPinkText else BiliText,
+                animationSpec = motion.tween(MotionTokens.Fast),
                 label = "chip-label",
-            )
-            val selectedScale by animateFloatAsState(
-                targetValue = if (selected) 1.025f else 1f,
-                animationSpec = motion.spring(dampingRatio = 0.55f, stiffness = 520f),
-                label = "chip-scale",
             )
             Surface(
                 onClick = { onFolderClick(folder) },
-                shape = RoundedCornerShape(50),
+                shape = RoundedCornerShape(2.dp),
                 color = container,
                 border = BorderStroke(1.dp, borderColor),
                 interactionSource = interactionSource,
                 modifier = Modifier
                     .widthIn(max = 240.dp)
                     .staggerIn(index = index, distance = 7.dp, key = folder.id)
-                    .pressScale(interactionSource, pressedScale = 0.94f)
-                    .graphicsLayer {
-                        scaleX = selectedScale
-                        scaleY = selectedScale
-                    },
+                    .pressScale(interactionSource, pressedScale = 0.96f),
             ) {
-                Row(
-                    Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = folder.title,
-                        color = labelColor,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 190.dp),
-                    )
-                    if (folder.count > 0) {
-                        Spacer(Modifier.size(6.dp))
+                Box(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(
-                            text = folder.count.toString(),
-                            color = labelColor.copy(alpha = 0.75f),
-                            fontSize = 11.sp,
+                            text = folder.title,
+                            color = labelColor,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 190.dp),
                         )
+                        if (folder.count > 0) {
+                            Spacer(Modifier.size(6.dp))
+                            Text(
+                                text = folder.count.toString(),
+                                color = BiliMuted,
+                                fontSize = 11.sp,
+                            )
+                        }
                     }
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(if (selected) BiliPinkStrong else Color.Transparent),
+                    )
                 }
             }
         }
@@ -431,14 +408,8 @@ private fun FolderHeader(state: LibraryUiState, onManageFolders: () -> Unit) {
             AnimatedContent(
                 targetState = title,
                 transitionSpec = {
-                    (fadeIn(motion.tween(260)) + slideInVertically(
-                        initialOffsetY = { it / 3 },
-                        animationSpec = motion.tween(340, easing = MotionEase.OutExpo),
-                    )).togetherWith(
-                        fadeOut(motion.tween(140)) + slideOutVertically(
-                            targetOffsetY = { -it / 4 },
-                            animationSpec = motion.tween(180, easing = MotionEase.In),
-                        ),
+                    fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
+                        fadeOut(motion.tween(MotionTokens.Fast)),
                     )
                 },
                 label = "folder-title",
@@ -477,7 +448,7 @@ private fun FolderHeader(state: LibraryUiState, onManageFolders: () -> Unit) {
                 onClick = onManageFolders,
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
             ) {
-                Text("管理收藏夹", color = BiliPink, fontSize = 12.sp)
+                Text("管理收藏夹", color = BiliPinkText, fontSize = 12.sp)
             }
         }
         AnimatedVisibility(
@@ -488,7 +459,7 @@ private fun FolderHeader(state: LibraryUiState, onManageFolders: () -> Unit) {
             ),
             exit = fadeOut(motion.tween(120)) + scaleOut(targetScale = 0.86f),
         ) {
-            InfoChip("演示模式", BiliBlue)
+            InfoChip("演示模式", BiliMuted)
         }
     }
 }
@@ -496,7 +467,7 @@ private fun FolderHeader(state: LibraryUiState, onManageFolders: () -> Unit) {
 @Composable
 private fun LoadingBox() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator(color = BiliPink, strokeWidth = 2.5.dp)
+        CircularProgressIndicator(color = BiliMuted, strokeWidth = 2.dp)
     }
 }
 
@@ -543,7 +514,7 @@ private fun EmptyOrError(
                     onClick = onRetry,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = BiliPink,
-                        contentColor = Color(0xFF1A0A12),
+                        contentColor = BiliOnPink,
                     ),
                 ) { Text("重试") }
             } else if (!state.user.loggedIn && !state.demo) {
@@ -561,7 +532,7 @@ private fun EmptyOrError(
                     onClick = onLogin,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = BiliPink,
-                        contentColor = Color(0xFF1A0A12),
+                        contentColor = BiliOnPink,
                     ),
                     modifier = Modifier.fillMaxWidth(0.7f),
                 ) { Text("登录 B 站") }
@@ -584,7 +555,7 @@ private fun EmptyOrError(
                     onClick = onManageFolders,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = BiliPink,
-                        contentColor = Color(0xFF1A0A12),
+                        contentColor = BiliOnPink,
                     ),
                 ) { Text("管理收藏夹") }
             } else if (state.search.isNotBlank()) {
@@ -598,7 +569,7 @@ private fun EmptyOrError(
             } else if (state.demo) {
                 Text("演示音频准备中…", style = MaterialTheme.typography.bodyMedium, color = BiliMuted)
                 Spacer(Modifier.height(12.dp))
-                CircularProgressIndicator(color = BiliPink, strokeWidth = 2.dp)
+                CircularProgressIndicator(color = BiliMuted, strokeWidth = 2.dp)
             } else {
                 Text("这里还没有内容", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(6.dp))
@@ -673,12 +644,12 @@ private fun TrackList(
                     if (state.loadingMore) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
-                            color = BiliPink,
+                            color = BiliMuted,
                             strokeWidth = 2.dp,
                         )
                     } else {
                         TextButton(onClick = onLoadMore) {
-                            Text("加载更多", color = BiliPink)
+                            Text("加载更多", color = BiliPinkText)
                         }
                     }
                 }
@@ -699,25 +670,21 @@ private fun TrackRow(
     val motion = LocalMotion.current
     val interactionSource = remember { MutableInteractionSource() }
     val background by animateColorAsState(
-        targetValue = if (isCurrent) BiliPink.copy(alpha = 0.08f) else Color.Transparent,
-        animationSpec = motion.tween(300),
+        targetValue = if (isCurrent) BiliSelected else Color.Transparent,
+        animationSpec = motion.tween(MotionTokens.Fast),
         label = "track-background",
     )
     val titleColor by animateColorAsState(
-        targetValue = if (isCurrent) BiliPink else BiliText,
-        animationSpec = motion.tween(260),
+        targetValue = BiliText,
+        animationSpec = motion.tween(MotionTokens.Fast),
         label = "track-title",
     )
     val accentLine by animateFloatAsState(
         targetValue = if (isCurrent) 1f else 0f,
-        animationSpec = motion.spring(dampingRatio = 0.7f, stiffness = 520f),
+        animationSpec = motion.tween(MotionTokens.Fast),
         label = "track-accent",
     )
-    val coverScale by animateFloatAsState(
-        targetValue = if (isCurrent) 1.055f else 1f,
-        animationSpec = motion.spring(dampingRatio = 0.6f, stiffness = 460f),
-        label = "track-cover",
-    )
+    val accentColor = BiliPinkStrong
     val trailing = when {
         resolving -> 1
         isCurrent -> 2
@@ -728,33 +695,27 @@ private fun TrackRow(
             .fillMaxWidth()
             .drawBehind {
                 if (accentLine > 0.001f) {
-                    val barHeight = size.height * 0.42f * accentLine
-                    drawRoundRect(
-                        color = BiliPink,
-                        topLeft = Offset(0f, (size.height - barHeight) / 2f),
-                        size = Size(3.dp.toPx(), barHeight),
-                        cornerRadius = CornerRadius(3.dp.toPx()),
+                    drawRect(
+                        color = accentColor.copy(alpha = accentLine),
+                        topLeft = Offset.Zero,
+                        size = Size(2.dp.toPx(), size.height),
                     )
                 }
             }
             .background(background)
             .clickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 onClick = onClick,
             )
-            .pressScale(interactionSource, pressedScale = 0.985f)
+            .pressScale(interactionSource, pressedScale = 0.99f)
             .padding(horizontal = 16.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CoverArt(
             item.cover,
             48.dp,
-            10.dp,
-            modifier = Modifier.graphicsLayer {
-                scaleX = coverScale
-                scaleY = coverScale
-            },
+            0.dp,
         )
         Column(
             Modifier
@@ -787,14 +748,8 @@ private fun TrackRow(
         AnimatedContent(
             targetState = trailing,
             transitionSpec = {
-                (fadeIn(motion.tween(180)) + scaleIn(
-                    initialScale = 0.6f,
-                    animationSpec = motion.spring(dampingRatio = 0.55f, stiffness = 760f),
-                )).togetherWith(
-                    fadeOut(motion.tween(120)) + scaleOut(
-                        targetScale = 0.6f,
-                        animationSpec = motion.tween(120, easing = MotionEase.In),
-                    ),
+                fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
+                    fadeOut(motion.tween(MotionTokens.Fast)),
                 )
             },
             label = "track-trailing",
@@ -802,7 +757,7 @@ private fun TrackRow(
             when (trailingState) {
                 1 -> CircularProgressIndicator(
                     modifier = Modifier.size(18.dp),
-                    color = BiliPink,
+                    color = BiliMuted,
                     strokeWidth = 2.dp,
                 )
                 2 -> Box(Modifier.size(18.dp)) { PlayingBars(isPlaying) }

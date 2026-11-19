@@ -82,11 +82,11 @@ import kotlin.math.roundToInt
  * 8–12 秒，避免和内容抢注意力。
  */
 object MotionTokens {
-    const val Fast = 140
-    const val Base = 240
-    const val Slow = 420
+    const val Fast = 120
+    const val Base = 180
+    const val Slow = 240
     const val Cinematic = 620
-    const val DialogExit = 180
+    const val DialogExit = 120
     const val StaggerStep = 28
     const val StaggerCap = 16
 }
@@ -201,32 +201,7 @@ fun Modifier.staggerIn(
     distance: Dp = 12.dp,
     scaleFrom: Float = 1f,
     key: Any? = Unit,
-): Modifier {
-    val motion = LocalMotion.current
-    if (!motion.enabled) return this
-
-    var entered by remember(key) { mutableStateOf(false) }
-    LaunchedEffect(key) { entered = true }
-    val progress by animateFloatAsState(
-        targetValue = if (entered) 1f else 0f,
-        animationSpec = motion.tween(
-            durationMs = MotionTokens.Slow,
-            delayMs = motion.staggerDelay(index),
-            easing = MotionEase.OutExpo,
-        ),
-        label = "stagger-in",
-    )
-
-    return graphicsLayer {
-        alpha = progress
-        translationY = (1f - progress) * distance.toPx()
-        if (scaleFrom < 1f) {
-            val scale = scaleFrom + (1f - scaleFrom) * progress
-            scaleX = scale
-            scaleY = scale
-        }
-    }
-}
+): Modifier = this
 
 /** 按下时轻微收紧：短 spring，松手立刻回弹。 */
 @Composable
@@ -253,10 +228,11 @@ fun Modifier.pressScale(
  */
 @Composable
 fun Modifier.skeleton(
-    shape: Shape = RoundedCornerShape(4.dp),
-    base: Color = BiliPanel2,
+    shape: Shape = RoundedCornerShape(0.dp),
 ): Modifier {
     val motion = LocalMotion.current
+    val base = BiliPanel2
+    val sweepColor = BiliPanel
     val clipped = clip(shape)
     if (!motion.enabled) return clipped.background(base)
 
@@ -278,336 +254,9 @@ fun Modifier.skeleton(
         val x = sweep * size.width
         val band = size.width.coerceAtLeast(1f) * 0.55f
         drawRect(
-            brush = Brush.linearGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    BiliPanel.copy(alpha = 0.85f),
-                    Color.Transparent,
-                ),
-                start = Offset(x - band, 0f),
-                end = Offset(x + band, size.height),
-            ),
-        )
-    }
-}
-
-// ---------------------------------------------------------------- 封面视差
-
-@Stable
-class CoverTiltState {
-    var rotationX by mutableFloatStateOf(0f)
-        internal set
-    var rotationY by mutableFloatStateOf(0f)
-        internal set
-    var highlightX by mutableFloatStateOf(0.5f)
-        internal set
-    var highlightY by mutableFloatStateOf(0.32f)
-        internal set
-
-    internal fun reset() {
-        rotationX = 0f
-        rotationY = 0f
-        highlightX = 0.5f
-        highlightY = 0.32f
-    }
-}
-
-/**
- * 用重力传感器做封面的轻微视差。
- *
- * 以打开播放页时的握持姿态为零点，基线缓慢跟随当前姿态，所以转动手机时会先
- * 倾斜、随后自然回正；平放在桌上也能得到同样的效果。传感器不可用或关闭动效
- * 时完全不动。
- */
-@Composable
-fun rememberCoverTilt(enabled: Boolean): CoverTiltState {
-    val state = remember { CoverTiltState() }
-    val motion = LocalMotion.current
-    val context = LocalContext.current
-
-    DisposableEffect(enabled, motion.enabled) {
-        if (!enabled || !motion.enabled) {
-            state.reset()
-            return@DisposableEffect onDispose { }
-        }
-        val manager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-        val sensor = manager?.getDefaultSensor(Sensor.TYPE_GRAVITY)
-            ?: manager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-        if (manager == null || sensor == null) {
-            state.reset()
-            return@DisposableEffect onDispose { }
-        }
-
-        var baselineX: Float? = null
-        var baselineY: Float? = null
-        var smoothX = 0f
-        var smoothY = 0f
-        var lastEventAt = 0L
-        val listener = object : SensorEventListener {
-            override fun onSensorChanged(event: SensorEvent) {
-                val now = SystemClock.uptimeMillis()
-                if (now - lastEventAt < 32L) return
-                lastEventAt = now
-
-                val x = -event.values[0] / SensorManager.GRAVITY_EARTH
-                val y = -event.values[1] / SensorManager.GRAVITY_EARTH
-                val baseX = baselineX ?: x.also { baselineX = it }
-                val baseY = baselineY ?: y.also { baselineY = it }
-                // 基线缓慢跟随姿态：倾斜后封面会回正，而不是卡在最大角度。
-                baselineX = baseX + (x - baseX) * 0.012f
-                baselineY = baseY + (y - baseY) * 0.012f
-
-                val dx = (x - baselineX!!).coerceIn(-1f, 1f)
-                val dy = (y - baselineY!!).coerceIn(-1f, 1f)
-                smoothX = smoothX * 0.82f + dx * 0.18f
-                smoothY = smoothY * 0.82f + dy * 0.18f
-
-                state.rotationY = (smoothX * 7f).coerceIn(-7f, 7f)
-                state.rotationX = (-smoothY * 7f).coerceIn(-7f, 7f)
-                state.highlightX = 0.5f + smoothX.coerceIn(-1f, 1f) * 0.34f
-                state.highlightY = 0.32f + smoothY.coerceIn(-1f, 1f) * 0.24f
-            }
-
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
-        }
-        manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_GAME)
-        onDispose { runCatching { manager.unregisterListener(listener) } }
-    }
-
-    return state
-}
-
-/** 把倾斜量应用到 3D 图层；读取状态只触发图层更新，不触发整页重组。 */
-fun Modifier.coverTilt(tilt: CoverTiltState): Modifier = graphicsLayer {
-    rotationX = tilt.rotationX
-    rotationY = tilt.rotationY
-    cameraDistance = 16f * density
-}
-
-/** 随倾斜移动的高光与环境光；在绘制阶段读取状态，开销只有一层。 */
-fun Modifier.coverGlare(tilt: CoverTiltState, accent: Color): Modifier = drawBehind {
-    val center = Offset(
-        x = size.width * tilt.highlightX,
-        y = size.height * tilt.highlightY,
-    )
-    drawRect(
-        brush = Brush.radialGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.22f),
-                Color.White.copy(alpha = 0.05f),
-                Color.Transparent,
-            ),
-            center = center,
-            radius = size.maxDimension * 0.9f,
-        ),
-    )
-    drawRect(
-        brush = Brush.linearGradient(
-            colors = listOf(
-                accent.copy(alpha = 0.12f),
-                Color.Transparent,
-                Color.Transparent,
-            ),
-            start = Offset.Zero,
-            end = Offset(size.width, size.height),
-        ),
-    )
-}
-
-// ---------------------------------------------------------------- 封面主色
-
-/** 封面的强调色，外加一个给 AsyncImage 回调用的钩子。 */
-class CoverAccent(
-    val color: Color,
-    val onCoverLoaded: (Drawable?) -> Unit,
-)
-
-private val coverAccentCache = LruCache<String, Int>(12)
-
-private fun cachedCoverAccent(cover: String): Color? =
-    coverAccentCache.get(cover)?.let { Color(it) }
-
-private fun cacheCoverAccent(cover: String, color: Color) {
-    if (cover.isNotBlank()) coverAccentCache.put(cover, color.toArgb())
-}
-
-/**
- * 从封面缩略图里取一个高饱和主色，作为播放页背景光晕和播放键的颜色。
- *
- * 不引入 Palette 依赖：把图缩到 32×32，按色相分桶，取权重最高的桶及左右邻居
- * 求加权平均，再把饱和度 / 明度夹到适合深色 UI 的范围。灰度封面回退到粉色。
- */
-@Composable
-fun rememberCoverAccent(cover: String, fallback: Color = BiliPink): CoverAccent {
-    val motion = LocalMotion.current
-    val cached = remember(cover) { cachedCoverAccent(cover) }
-    var target by remember(cover) { mutableStateOf(cached ?: fallback) }
-    val animated by animateColorAsState(
-        targetValue = target,
-        animationSpec = motion.tween(durationMs = 720, easing = MotionEase.OutExpo),
-        label = "cover-accent",
-    )
-    val onLoaded: (Drawable?) -> Unit = { drawable ->
-        val extracted = extractCoverAccent(drawable)
-        if (extracted != null && extracted != target) {
-            target = extracted
-            cacheCoverAccent(cover, extracted)
-        }
-    }
-    return CoverAccent(animated, onLoaded)
-}
-
-fun extractCoverAccent(drawable: Drawable?): Color? {
-    if (drawable == null) return null
-    return runCatching {
-        val bitmap = drawable.toBitmap(
-            width = 32,
-            height = 32,
-            config = Bitmap.Config.ARGB_8888,
-        )
-        if (bitmap.width <= 0 || bitmap.height <= 0) return@runCatching null
-        val pixels = IntArray(bitmap.width * bitmap.height)
-        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-
-        val bins = 24
-        val weights = FloatArray(bins)
-        val reds = FloatArray(bins)
-        val greens = FloatArray(bins)
-        val blues = FloatArray(bins)
-        for (pixel in pixels) {
-            val alpha = (pixel ushr 24) and 0xFF
-            if (alpha < 160) continue
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-            val maxChannel = max(r, max(g, b))
-            val minChannel = min(r, min(g, b))
-            if (maxChannel < 24) continue
-            val delta = maxChannel - minChannel
-            if (delta == 0) continue
-            val saturation = delta / maxChannel.toFloat()
-            val value = maxChannel / 255f
-            if (saturation < 0.14f || value < 0.16f) continue
-
-            val hue = when (maxChannel) {
-                r -> 60f * (((g - b) / delta.toFloat()) % 6f)
-                g -> 60f * ((b - r) / delta.toFloat() + 2f)
-                else -> 60f * ((r - g) / delta.toFloat() + 4f)
-            }.let { if (it < 0f) it + 360f else it }
-            val bin = ((hue / 360f) * bins).toInt().coerceIn(0, bins - 1)
-            val weight = saturation * (0.35f + value * 0.65f)
-            weights[bin] += weight
-            reds[bin] += r * weight
-            greens[bin] += g * weight
-            blues[bin] += b * weight
-        }
-
-        var bestBin = -1
-        var bestWeight = 0f
-        for (index in 0 until bins) {
-            if (weights[index] > bestWeight) {
-                bestWeight = weights[index]
-                bestBin = index
-            }
-        }
-        if (bestBin < 0 || bestWeight <= 0f) return@runCatching null
-
-        var sumWeight = 0f
-        var sumR = 0f
-        var sumG = 0f
-        var sumB = 0f
-        for (offset in -1..1) {
-            val index = Math.floorMod(bestBin + offset, bins)
-            val weight = weights[index]
-            if (weight <= 0f) continue
-            sumWeight += weight
-            sumR += reds[index]
-            sumG += greens[index]
-            sumB += blues[index]
-        }
-        if (sumWeight <= 0f) return@runCatching null
-
-        val hsl = FloatArray(3)
-        ColorUtils.RGBToHSL(
-            (sumR / sumWeight).roundToInt().coerceIn(0, 255),
-            (sumG / sumWeight).roundToInt().coerceIn(0, 255),
-            (sumB / sumWeight).roundToInt().coerceIn(0, 255),
-            hsl,
-        )
-        hsl[1] = hsl[1].coerceIn(0.42f, 0.8f)
-        hsl[2] = hsl[2].coerceIn(0.5f, 0.72f)
-        Color(ColorUtils.HSLToColor(hsl))
-    }.getOrNull()
-}
-
-// ---------------------------------------------------------------- 环境光与弹窗
-
-/**
- * 播放页背景的两团缓慢漂移的光晕，颜色来自封面主色。
- * 只改变图层位移与缩放，不在每帧重建渐变。
- */
-@Composable
-fun AuroraGlow(accent: Color, modifier: Modifier = Modifier) {
-    val motion = LocalMotion.current
-    val drift by if (motion.enabled) {
-        val transition = rememberInfiniteTransition(label = "aurora")
-        transition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = androidx.compose.animation.core.tween(
-                    durationMillis = 11_000,
-                    easing = FastOutSlowInEasing,
-                ),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "aurora-drift",
-        )
-    } else {
-        remember { mutableFloatStateOf(0.5f) }
-    }
-
-    Box(modifier) {
-        Box(
-            Modifier
-                .align(Alignment.TopCenter)
-                .offset(y = (-190).dp)
-                .size(540.dp)
-                .graphicsLayer {
-                    translationX = (drift - 0.5f) * 96.dp.toPx()
-                    translationY = (drift - 0.5f) * 18.dp.toPx()
-                    scaleX = 1.02f + drift * 0.08f
-                    scaleY = 1.04f + drift * 0.06f
-                }
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(
-                            accent.copy(alpha = 0.22f),
-                            accent.copy(alpha = 0.07f),
-                            Color.Transparent,
-                        ),
-                    ),
-                ),
-        )
-        Box(
-            Modifier
-                .align(Alignment.BottomEnd)
-                .offset(x = 120.dp, y = 140.dp)
-                .size(420.dp)
-                .graphicsLayer {
-                    translationY = (0.5f - drift) * 70.dp.toPx()
-                    scaleX = 1.08f - drift * 0.05f
-                    scaleY = 1.08f - drift * 0.05f
-                }
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(
-                            BiliBlue.copy(alpha = 0.12f),
-                            accent.copy(alpha = 0.08f),
-                            Color.Transparent,
-                        ),
-                    ),
-                ),
+            color = sweepColor,
+            topLeft = Offset(x - band, 0f),
+            size = androidx.compose.ui.geometry.Size(band * 2f, size.height),
         )
     }
 }
@@ -648,12 +297,12 @@ fun MotionDialog(
             visible = visible,
             enter = fadeIn(motion.tween(MotionTokens.Base)) +
                 scaleIn(
-                    initialScale = 0.92f,
-                    animationSpec = motion.spring(dampingRatio = 0.78f, stiffness = 420f),
+                    initialScale = 0.98f,
+                    animationSpec = motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart),
                 ),
             exit = fadeOut(motion.tween(MotionTokens.Fast, easing = MotionEase.In)) +
                 scaleOut(
-                    targetScale = 0.96f,
+                    targetScale = 0.98f,
                     animationSpec = motion.tween(MotionTokens.DialogExit, easing = MotionEase.In),
                 ),
         ) {

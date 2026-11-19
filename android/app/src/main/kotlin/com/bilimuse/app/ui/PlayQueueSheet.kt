@@ -76,7 +76,7 @@ fun PlayQueueSheet(
         contentColor = BiliText,
         tonalElevation = 0.dp,
         scrimColor = Color.Black.copy(alpha = 0.55f),
-        shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
+        shape = RoundedCornerShape(0.dp),
         dragHandle = { BottomSheetDragHandle() },
     ) {
         Column(
@@ -131,7 +131,7 @@ private fun QueueHeader(state: PlayQueueUiState, onDismiss: () -> Unit) {
                 Text(
                     text = state.modeText,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (state.shuffle) BiliPink else BiliMuted,
+                    color = if (state.shuffle) BiliPinkText else BiliMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -207,10 +207,7 @@ private fun QueueList(
                 modifier = Modifier
                     .animateItem(
                         fadeInSpec = null,
-                        placementSpec = LocalMotion.current.spring(
-                            dampingRatio = 0.86f,
-                            stiffness = 400f,
-                        ),
+                        placementSpec = LocalMotion.current.tween(MotionTokens.Fast),
                         fadeOutSpec = null,
                     )
                     .then(
@@ -244,40 +241,39 @@ private fun QueueRow(
     val motion = LocalMotion.current
     val interactionSource = remember { MutableInteractionSource() }
     val background by animateColorAsState(
-        targetValue = if (current) BiliPink.copy(alpha = 0.09f) else Color.Transparent,
-        animationSpec = motion.tween(260),
+        targetValue = if (current) BiliSelected else Color.Transparent,
+        animationSpec = motion.tween(MotionTokens.Fast),
         label = "queue-row-background",
     )
     val indicator by animateFloatAsState(
         targetValue = if (current) 1f else 0f,
-        animationSpec = motion.spring(dampingRatio = 0.7f, stiffness = 560f),
+        animationSpec = motion.tween(MotionTokens.Fast),
         label = "queue-row-indicator",
     )
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(0.dp))
             .background(background)
             .clickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 onClickLabel = "播放",
                 onClick = onClick,
             )
-            .pressScale(interactionSource, pressedScale = 0.985f)
+            .pressScale(interactionSource, pressedScale = 0.99f)
             .padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier
-                .width(3.dp)
+                .width(2.dp)
                 .height(42.dp)
                 .graphicsLayer {
                     scaleY = indicator.coerceAtLeast(0.001f)
                     alpha = indicator
                 }
-                .clip(RoundedCornerShape(2.dp))
-                .background(BiliPink),
+                .background(BiliPinkStrong),
         )
         Spacer(Modifier.width(9.dp))
         Box(
@@ -295,7 +291,7 @@ private fun QueueRow(
             }
         }
         Spacer(Modifier.width(8.dp))
-        CoverArt(item.cover, 42.dp, corner = 8.dp)
+        CoverArt(item.cover, 42.dp, corner = 0.dp)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -340,20 +336,20 @@ private fun QueueFooter(state: PlayQueueUiState, onLoadMore: () -> Unit) {
                 if (state.loadingMore) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(14.dp),
-                        color = BiliPink,
+                        color = BiliPinkText,
                         strokeWidth = 2.dp,
                     )
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(
                     text = if (state.loadingMore) "正在加载下一页…" else "加载下一页",
-                    color = if (state.loadingMore) BiliMuted else BiliPink,
+                    color = if (state.loadingMore) BiliMuted else BiliPinkText,
                 )
             }
             state.preparing -> Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(12.dp),
-                    color = BiliPink,
+                    color = BiliPinkText,
                     strokeWidth = 1.5.dp,
                 )
                 Spacer(Modifier.width(7.dp))

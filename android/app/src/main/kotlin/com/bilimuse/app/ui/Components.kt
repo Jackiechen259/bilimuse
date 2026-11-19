@@ -20,6 +20,7 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -88,15 +90,15 @@ fun MotionIconButton(
     Box(
         modifier = modifier
             .size(44.dp)
-            .clip(CircleShape)
+            .clip(RoundedCornerShape(2.dp))
             .clickable(
                 enabled = enabled,
                 role = Role.Button,
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 onClick = onClick,
             )
-            .pressScale(interactionSource, pressedScale = 0.86f)
+            .pressScale(interactionSource, pressedScale = 0.92f)
             .semantics {
                 this.contentDescription = contentDescription
                 this.role = Role.Button
@@ -154,19 +156,19 @@ fun shortHost(host: String): String = when {
 fun CoverArt(
     cover: String,
     size: Dp,
-    corner: Dp = 12.dp,
+    corner: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     Box(
         modifier = modifier
             .size(size)
             .clip(RoundedCornerShape(corner))
-            .background(CoverFallbackBrush),
+            .background(BiliPink),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = "♪",
-            color = Color.White.copy(alpha = 0.9f),
+            color = BiliOnPink,
             fontSize = (size.value * 0.36f).sp,
             fontWeight = FontWeight.Bold,
         )
@@ -184,7 +186,7 @@ fun CoverArt(
 @Composable
 fun PlayingBars(
     active: Boolean,
-    color: Color = BiliPink,
+    color: Color = BiliPinkStrong,
     modifier: Modifier = Modifier,
 ) {
     val motion = LocalMotion.current
@@ -230,11 +232,10 @@ fun PlayingBars(
         val gap = barWidth / 2f
         levels.forEachIndexed { index, level ->
             val barHeight = (size.height * level).coerceAtLeast(2f)
-            drawRoundRect(
+            drawRect(
                 color = color,
                 topLeft = Offset(index * (barWidth + gap), size.height - barHeight),
                 size = Size(barWidth, barHeight),
-                cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f),
             )
         }
     }
@@ -248,9 +249,9 @@ fun InfoChip(
 ) {
     Surface(
         modifier = modifier,
-        color = color.copy(alpha = 0.13f),
-        shape = RoundedCornerShape(50),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.35f)),
+        color = Color.Transparent,
+        shape = RoundedCornerShape(2.dp),
+        border = BorderStroke(1.dp, BiliLine),
     ) {
         Text(
             text = text,
@@ -289,17 +290,48 @@ fun SettingSwitch(
             )
         }
         Spacer(Modifier.size(12.dp))
-        Switch(
+        FlatSwitch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
             enabled = enabled,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = BiliPink,
-                uncheckedThumbColor = BiliMuted,
-                uncheckedTrackColor = BiliLine,
-                uncheckedBorderColor = Color.Transparent,
-            ),
+            onCheckedChange = onCheckedChange,
+        )
+    }
+}
+
+/** 扁平开关：2dp 方角轨道 + 方形滑块，只动滑块位移与颜色。 */
+@Composable
+private fun FlatSwitch(
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val motion = LocalMotion.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val thumbOffset by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (checked) 17.dp else 0.dp,
+        animationSpec = motion.tween(MotionTokens.Fast, easing = MotionEase.OutQuart),
+        label = "flat-switch",
+    )
+    Box(
+        Modifier
+            .size(38.dp, 21.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(if (checked) BiliPink else BiliLine)
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Switch,
+                interactionSource = interactionSource,
+                indication = null,
+                onValueChange = onCheckedChange,
+            )
+            .padding(3.dp),
+    ) {
+        Box(
+            Modifier
+                .offset(x = thumbOffset)
+                .size(15.dp)
+                .background(if (checked) BiliOnPink else BiliFaint),
         )
     }
 }
@@ -308,8 +340,8 @@ fun SettingSwitch(
 fun ProgressLine(
     progress: Float,
     modifier: Modifier = Modifier,
-    color: Color = BiliPink,
-    track: Color = Color.White.copy(alpha = 0.07f),
+    color: Color = BiliPinkStrong,
+    track: Color = BiliTrack,
     resetKey: Any? = Unit,
 ) {
     val motion = LocalMotion.current
@@ -326,21 +358,15 @@ fun ProgressLine(
     }
     Box(
         modifier = modifier
-            .height(3.dp)
-            .clip(RoundedCornerShape(2.dp))
+            .height(2.dp)
             .background(track),
     ) {
         if (value.value > 0f) {
             Box(
                 Modifier
                     .fillMaxWidth(value.value)
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(color.copy(alpha = 0.72f), color),
-                        ),
-                    ),
+                    .height(2.dp)
+                    .background(color),
             )
         }
     }
@@ -362,17 +388,11 @@ fun MiniPlayer(
     Column(
         Modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        BiliPanel.copy(alpha = 0.99f),
-                        BiliPanel2.copy(alpha = 0.98f),
-                    ),
-                ),
-            )
+            .background(BiliPanel)
             .navigationBarsPadding(),
     ) {
-        ProgressLine(progress, Modifier.fillMaxWidth(), color = BiliPink, resetKey = state.bvid)
+        Box(Modifier.fillMaxWidth().height(1.dp).background(BiliLine))
+        ProgressLine(progress, Modifier.fillMaxWidth(), color = BiliPinkStrong, resetKey = state.bvid)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -383,17 +403,13 @@ fun MiniPlayer(
             AnimatedContent(
                 targetState = state.cover,
                 transitionSpec = {
-                    (fadeIn(motion.tween(360, delayMs = 40, easing = MotionEase.OutExpo)) +
-                        scaleIn(
-                            initialScale = 1.08f,
-                            animationSpec = motion.tween(520, easing = MotionEase.OutExpo),
-                        )).togetherWith(
-                        fadeOut(motion.tween(240, easing = MotionEase.InOut)),
+                    fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
+                        fadeOut(motion.tween(MotionTokens.Fast)),
                     )
                 },
                 label = "mini-cover",
             ) { cover ->
-                CoverArt(cover, 44.dp, 10.dp)
+                CoverArt(cover, 44.dp, 0.dp)
             }
             Column(
                 Modifier
@@ -422,7 +438,7 @@ fun MiniPlayer(
                     Text(
                         text = text,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (state.isBuffering) BiliBlue else BiliMuted,
+                        color = BiliMuted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -435,14 +451,8 @@ fun MiniPlayer(
                 AnimatedContent(
                     targetState = state.isPlaying,
                     transitionSpec = {
-                        (fadeIn(motion.tween(150)) + scaleIn(
-                            initialScale = 0.62f,
-                            animationSpec = motion.spring(dampingRatio = 0.55f, stiffness = 760f),
-                        )).togetherWith(
-                            fadeOut(motion.tween(110)) + scaleOut(
-                                targetScale = 0.62f,
-                                animationSpec = motion.tween(110, easing = MotionEase.In),
-                            ),
+                        fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
+                            fadeOut(motion.tween(MotionTokens.Fast)),
                         )
                     },
                     label = "mini-play-icon",
@@ -480,13 +490,13 @@ private fun MiniTransportButton(
     val interactionSource = remember { MutableInteractionSource() }
     Surface(
         onClick = onClick,
-        shape = CircleShape,
+        shape = RoundedCornerShape(2.dp),
         color = Color.Transparent,
         contentColor = BiliText,
         interactionSource = interactionSource,
         modifier = Modifier
             .size(42.dp)
-            .pressScale(interactionSource, pressedScale = 0.86f)
+            .pressScale(interactionSource, pressedScale = 0.92f)
             .semantics { this.contentDescription = contentDescription },
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -511,7 +521,7 @@ fun SkeletonRow() {
         Box(
             Modifier
                 .size(48.dp)
-                .skeleton(RoundedCornerShape(10.dp)),
+                .skeleton(RoundedCornerShape(0.dp)),
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -519,14 +529,14 @@ fun SkeletonRow() {
                 Modifier
                     .fillMaxWidth(0.75f)
                     .height(12.dp)
-                    .skeleton(RoundedCornerShape(4.dp)),
+                    .skeleton(RoundedCornerShape(0.dp)),
             )
             Spacer(Modifier.height(8.dp))
             Box(
                 Modifier
                     .fillMaxWidth(0.4f)
                     .height(10.dp)
-                    .skeleton(RoundedCornerShape(4.dp)),
+                    .skeleton(RoundedCornerShape(0.dp)),
             )
         }
     }
@@ -537,13 +547,12 @@ fun BrandLogo(size: Dp = 40.dp) {
     Box(
         modifier = Modifier
             .size(size)
-            .clip(RoundedCornerShape(size * 0.3f))
-            .background(CoverFallbackBrush),
+            .background(BiliPink),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = "♪",
-            color = Color.White,
+            color = BiliOnPink,
             fontWeight = FontWeight.Bold,
             fontSize = (size.value * 0.5f).sp,
         )

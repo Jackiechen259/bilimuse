@@ -146,7 +146,7 @@ fun LoginDialog(
                 .fillMaxWidth()
                 .widthIn(max = 360.dp),
             color = BiliPanel,
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(0.dp),
             border = BorderStroke(1.dp, BiliLine),
         ) {
             Column(
@@ -176,7 +176,7 @@ fun LoginDialog(
                 Box(
                     modifier = Modifier
                         .size(232.dp)
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(0.dp))
                         .background(Color.White),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -203,7 +203,7 @@ fun LoginDialog(
                         } else {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 if (loading) {
-                                    CircularProgressIndicator(color = BiliPink)
+                                    CircularProgressIndicator(color = BiliMuted)
                                 } else {
                                     Text("二维码不可用", color = Color(0xFF333333))
                                 }
@@ -230,22 +230,18 @@ fun LoginDialog(
                                 .fillMaxWidth()
                                 .height(2.dp)
                                 .offset { androidx.compose.ui.unit.IntOffset(0, (scan * 232f * density).toInt()) }
-                                .background(
-                                    Brush.horizontalGradient(
-                                        listOf(Color.Transparent, BiliPink.copy(alpha = 0.7f), Color.Transparent),
-                                    ),
-                                ),
+                                .background(BiliPinkStrong),
                         )
                     }
                     if (expired) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color(0xCC0B0D12)),
+                                .background(Color(0xCC111114)),
                             contentAlignment = Alignment.Center,
                         ) {
                             TextButton(onClick = { attempt += 1 }) {
-                                Text("二维码已过期 · 点击刷新", color = BiliPink)
+                                Text("二维码已过期 · 点击刷新", color = BiliPinkText)
                             }
                         }
                     }
@@ -264,7 +260,7 @@ fun LoginDialog(
                         style = MaterialTheme.typography.bodyMedium,
                         color = when {
                             error || expired -> BiliDanger
-                            text.contains("已扫码") -> BiliBlue
+                            text.contains("已扫码") -> BiliMuted
                             else -> BiliText
                         },
                         textAlign = TextAlign.Center,
@@ -284,7 +280,7 @@ fun LoginDialog(
                         onClick = { attempt += 1 },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = BiliPink,
-                            contentColor = Color(0xFF1A0A12),
+                            contentColor = BiliOnPink,
                         ),
                     ) { Text("刷新二维码") }
                 }
@@ -297,7 +293,7 @@ fun LoginDialog(
                     OutlinedButton(
                         onClick = { onWebLogin(true) },
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(2.dp),
                         border = BorderStroke(1.dp, BiliLine),
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
                     ) {
@@ -306,7 +302,7 @@ fun LoginDialog(
                     OutlinedButton(
                         onClick = { onWebLogin(false) },
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(2.dp),
                         border = BorderStroke(1.dp, BiliLine),
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
                     ) {

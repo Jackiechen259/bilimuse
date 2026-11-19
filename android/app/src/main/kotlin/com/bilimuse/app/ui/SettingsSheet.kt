@@ -70,6 +70,8 @@ fun SettingsSheet(
     onChunkSize: (Int) -> Unit,
     onLossless: (Boolean) -> Unit,
     onShowBtrDetails: (Boolean) -> Unit,
+    theme: AppTheme,
+    onTheme: (AppTheme) -> Unit,
     onMotionEnabled: (Boolean) -> Unit,
     onLyricsOnline: (Boolean) -> Unit,
     onLyricsBili: (Boolean) -> Unit,
@@ -83,6 +85,9 @@ fun SettingsSheet(
         sheetState = sheetState,
         containerColor = BiliPanel,
         contentColor = BiliText,
+        shape = RoundedCornerShape(0.dp),
+        tonalElevation = 0.dp,
+        scrimColor = Color.Black.copy(alpha = 0.55f),
         dragHandle = { BottomSheetDragHandle() },
     ) {
         Column(
@@ -135,9 +140,11 @@ fun SettingsSheet(
                         onClick = { onConcurrency(value) },
                         enabled = settings.btrEnabled,
                         label = { Text("$value") },
+                        shape = RoundedCornerShape(2.dp),
+                        border = BorderStroke(1.dp, if (settings.concurrency == value) BiliPinkStrong else BiliLine),
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = BiliPink.copy(alpha = 0.2f),
-                            selectedLabelColor = BiliPink,
+                            selectedContainerColor = BiliSelected,
+                            selectedLabelColor = BiliPinkText,
                         ),
                     )
                 }
@@ -164,9 +171,11 @@ fun SettingsSheet(
                             onClick = { onChunkSize(bytes) },
                             enabled = settings.btrEnabled,
                             label = { Text(label) },
+                            shape = RoundedCornerShape(2.dp),
+                            border = BorderStroke(1.dp, if (settings.chunkSize == bytes) BiliPinkStrong else BiliLine),
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = BiliPink.copy(alpha = 0.2f),
-                                selectedLabelColor = BiliPink,
+                                selectedContainerColor = BiliSelected,
+                                selectedLabelColor = BiliPinkText,
                             ),
                         )
                     }
@@ -182,17 +191,9 @@ fun SettingsSheet(
 
             Spacer(Modifier.height(8.dp))
             Surface(
-                color = if (settings.btrEnabled) {
-                    BiliPink.copy(alpha = 0.08f)
-                } else {
-                    BiliBlue.copy(alpha = 0.08f)
-                },
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(
-                    1.dp,
-                    if (settings.btrEnabled) BiliPink.copy(alpha = 0.22f)
-                    else BiliBlue.copy(alpha = 0.22f),
-                ),
+                color = BiliSelected,
+                shape = RoundedCornerShape(2.dp),
+                border = BorderStroke(1.dp, BiliLine),
             ) {
                 Text(
                     text = if (settings.btrEnabled) {
@@ -202,7 +203,7 @@ fun SettingsSheet(
                         "BTR 已关闭，单连接直通"
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (settings.btrEnabled) BiliPink else BiliBlue,
+                    color = if (settings.btrEnabled) BiliText2 else BiliMuted,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
                 )
             }
@@ -238,9 +239,41 @@ fun SettingsSheet(
             Spacer(Modifier.height(22.dp))
             SectionTitle("界面")
 
+            Text(
+                "界面风格",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                AppTheme.entries.forEach { option ->
+                    FilterChip(
+                        selected = theme == option,
+                        onClick = { onTheme(option) },
+                        label = { Text(option.label) },
+                        shape = RoundedCornerShape(2.dp),
+                        border = BorderStroke(1.dp, if (theme == option) BiliPinkStrong else BiliLine),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = BiliSelected,
+                            selectedLabelColor = BiliPinkText,
+                        ),
+                    )
+                }
+            }
+            Text(
+                "粉色只出现在播放、进度与选中项",
+                style = MaterialTheme.typography.bodySmall,
+                color = BiliMuted,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+
+            Spacer(Modifier.height(8.dp))
             SettingSwitch(
                 title = "界面动效",
-                description = "封面视差、错峰入场与页面转场；系统关闭动画时自动停用",
+                description = "页面转场与按压反馈；系统关闭动画时自动停用",
                 checked = settings.motionEnabled,
                 onCheckedChange = onMotionEnabled,
             )
@@ -267,11 +300,11 @@ fun SettingsSheet(
                 OutlinedButton(
                     onClick = if (update.hasOpenableUpdate) onOpenUpdate else onCheckUpdate,
                     enabled = update.status != UpdateStatus.CHECKING,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(2.dp),
                     border = BorderStroke(
                         1.dp,
                         if (update.status == UpdateStatus.AVAILABLE || update.status == UpdateStatus.READY) {
-                            BiliPink.copy(alpha = 0.55f)
+                            BiliPinkStrong
                         } else {
                             BiliLine
                         },
@@ -281,7 +314,7 @@ fun SettingsSheet(
                     Text(
                         text = updateActionLabel(update),
                         color = if (update.status == UpdateStatus.AVAILABLE || update.status == UpdateStatus.READY) {
-                            BiliPink
+                            BiliPinkText
                         } else {
                             BiliText
                         },
@@ -308,7 +341,7 @@ fun SettingsSheet(
             Spacer(Modifier.height(6.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 TextButton(onClick = onDismiss) {
-                    Text("完成", color = BiliPink)
+                    Text("完成", color = BiliPinkText)
                 }
             }
         }
@@ -326,7 +359,7 @@ private fun AccountCard(
 ) {
     Surface(
         color = BiliPanel2,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(0.dp),
         border = BorderStroke(1.dp, BiliLine),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -335,17 +368,12 @@ private fun AccountCard(
                 Box(
                     modifier = Modifier
                         .size(44.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (demo) CoverFallbackBrush
-                            else Brush.linearGradient(
-                                listOf(Color(0xFF2B3242), Color(0xFF1A1F2B)),
-                            ),
-                        ),
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(if (demo) BiliPink else BiliPanel2),
                     contentAlignment = Alignment.Center,
                 ) {
                     when {
-                        demo -> Text("♪", color = Color.White, fontWeight = FontWeight.Bold)
+                        demo -> Text("♪", color = BiliOnPink, fontWeight = FontWeight.Bold)
                         user.face.isNotBlank() -> AsyncImage(
                             model = user.face,
                             contentDescription = null,
@@ -398,7 +426,7 @@ private fun AccountCard(
                         onClick = onLogin,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = BiliPink,
-                            contentColor = Color(0xFF1A0A12),
+                            contentColor = BiliOnPink,
                         ),
                     ) { Text("登录 B 站", fontSize = 12.sp) }
                 }
@@ -408,7 +436,7 @@ private fun AccountCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (demo) {
                         TextButton(onClick = onLogin) {
-                            Text("登录 B 站", color = BiliPink, fontSize = 12.sp)
+                            Text("登录 B 站", color = BiliPinkText, fontSize = 12.sp)
                         }
                     } else {
                         TextButton(onClick = onDemo) {
@@ -427,7 +455,7 @@ private fun SectionTitle(text: String) {
         text = text,
         color = BiliMuted,
         fontSize = 11.sp,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         letterSpacing = 1.2.sp,
         modifier = Modifier.padding(bottom = 8.dp),
     )
@@ -438,8 +466,7 @@ internal fun BottomSheetDragHandle() {
     Box(
         Modifier
             .padding(vertical = 10.dp)
-            .size(width = 36.dp, height = 4.dp)
-            .clip(RoundedCornerShape(2.dp))
+            .size(width = 24.dp, height = 2.dp)
             .background(BiliLine),
     )
 }
@@ -465,11 +492,12 @@ private fun updateActionLabel(update: UpdateUiState): String = when (update.stat
     UpdateStatus.FAILED -> if (update.update != null) "查看" else "重试"
 }
 
+@Composable
 private fun updateStatusColor(update: UpdateUiState): Color = when (update.status) {
     UpdateStatus.AVAILABLE,
     UpdateStatus.DOWNLOADING,
     UpdateStatus.READY,
-    -> BiliPink
+    -> BiliPinkText
     UpdateStatus.FAILED -> BiliDanger
     else -> BiliMuted
 }

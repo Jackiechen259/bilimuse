@@ -56,7 +56,7 @@ fun UpdateDialog(
                 .fillMaxWidth()
                 .widthIn(max = 390.dp),
             color = BiliPanel,
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(0.dp),
             border = BorderStroke(1.dp, BiliLine),
         ) {
             Column(
@@ -155,10 +155,10 @@ private fun AvailableSection(onDownload: () -> Unit, onDismiss: () -> Unit) {
             Button(
                 onClick = onDownload,
                 modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(2.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = BiliPink,
-                    contentColor = Color(0xFF1A0A12),
+                    contentColor = BiliOnPink,
                 ),
             ) {
                 Text("下载更新")
@@ -186,8 +186,8 @@ private fun DownloadingSection(state: UpdateUiState, onCancel: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(6.dp)
-                .clip(RoundedCornerShape(3.dp)),
-            color = BiliPink,
+                .clip(RoundedCornerShape(0.dp)),
+            color = BiliPinkText,
             trackColor = BiliLine,
         )
         Spacer(Modifier.height(6.dp))
@@ -198,7 +198,7 @@ private fun DownloadingSection(state: UpdateUiState, onCancel: () -> Unit) {
             Text(
                 text = "${(state.progress * 100).toInt()}%",
                 style = MaterialTheme.typography.bodySmall,
-                color = BiliPink,
+                color = BiliPinkText,
             )
             Text(
                 text = if (state.totalBytes > 0L) {
@@ -227,17 +227,17 @@ private fun ReadySection(
         Text(
             text = "更新包已下载并通过完整性校验。",
             style = MaterialTheme.typography.bodySmall,
-            color = BiliBlue,
+            color = BiliMuted,
         )
         Spacer(Modifier.height(10.dp))
         Button(
             onClick = { state.apkFile?.let(onInstall) },
             enabled = state.apkFile != null,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(2.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = BiliPink,
-                contentColor = Color(0xFF1A0A12),
+                contentColor = BiliOnPink,
             ),
         ) {
             Text("安装更新")
@@ -277,10 +277,10 @@ private fun FailedSection(
             Button(
                 onClick = onRetry,
                 modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(2.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = BiliPink,
-                    contentColor = Color(0xFF1A0A12),
+                    contentColor = BiliOnPink,
                 ),
             ) {
                 Text("重试下载")

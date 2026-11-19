@@ -18,6 +18,7 @@ class SettingsStore(context: Context) {
             .putInt(KEY_CHUNK, next.chunkSize)
             .putBoolean(KEY_LOSSLESS, next.preferLossless)
             .putBoolean(KEY_SHOW_BTR_DETAILS, next.showBtrDetails)
+            .putString(KEY_THEME, next.theme)
             .putBoolean(KEY_MOTION, next.motionEnabled)
             .putStringSet(KEY_HIDDEN_FOLDERS, next.hiddenFolderIds.map { it.toString() }.toSet())
             .putBoolean(KEY_LYRICS_ONLINE, next.lyricsOnline)
@@ -38,6 +39,10 @@ class SettingsStore(context: Context) {
 
     fun setShowBtrDetails(enabled: Boolean): EngineSettings =
         update { it.copy(showBtrDetails = enabled) }
+
+    fun setTheme(theme: String): EngineSettings = update {
+        it.copy(theme = if (theme in setOf("ink", "paper", "cream")) theme else "ink")
+    }
 
     fun setMotionEnabled(enabled: Boolean): EngineSettings =
         update { it.copy(motionEnabled = enabled) }
@@ -70,6 +75,7 @@ class SettingsStore(context: Context) {
         chunkSize = prefs.getInt(KEY_CHUNK, 512 * 1024),
         preferLossless = prefs.getBoolean(KEY_LOSSLESS, true),
         showBtrDetails = prefs.getBoolean(KEY_SHOW_BTR_DETAILS, true),
+        theme = prefs.getString(KEY_THEME, "ink") ?: "ink",
         motionEnabled = prefs.getBoolean(KEY_MOTION, true),
         hiddenFolderIds = prefs.getStringSet(KEY_HIDDEN_FOLDERS, emptySet())
             .orEmpty()
@@ -86,6 +92,7 @@ class SettingsStore(context: Context) {
         const val KEY_CHUNK = "chunk_size"
         const val KEY_LOSSLESS = "prefer_lossless"
         const val KEY_SHOW_BTR_DETAILS = "show_btr_details"
+        const val KEY_THEME = "theme"
         const val KEY_MOTION = "motion_enabled"
         const val KEY_HIDDEN_FOLDERS = "hidden_folders"
         const val KEY_LYRICS_ONLINE = "lyrics_online"

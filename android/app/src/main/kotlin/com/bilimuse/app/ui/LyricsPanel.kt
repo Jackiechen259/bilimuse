@@ -58,6 +58,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -302,8 +303,8 @@ private fun LyricsToolbar(
         ) {
             when {
                 !ok -> Text("歌词", style = MaterialTheme.typography.titleSmall)
-                sourceLabel.isBlank() -> InfoChip("歌词", BiliPink)
-                else -> InfoChip(sourceLabel, BiliPink)
+                sourceLabel.isBlank() -> InfoChip("歌词", BiliPinkText)
+                else -> InfoChip(sourceLabel, BiliPinkText)
             }
             if (!synced && ok) {
                 Spacer(Modifier.width(6.dp))
@@ -366,7 +367,7 @@ private fun LyricsToolbar(
                 onClick = onImport,
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
             ) {
-                Text("导入", color = BiliPink, fontSize = 12.sp)
+                Text("导入", color = BiliPinkText, fontSize = 12.sp)
             }
             TextButton(
                 onClick = onReload,
@@ -390,7 +391,7 @@ private fun LyricsToolbar(
                 Text(
                     text = formatOffset(offsetMs),
                     style = MaterialTheme.typography.bodySmall,
-                    color = BiliPink,
+                    color = BiliPinkText,
                     modifier = Modifier.padding(horizontal = 6.dp),
                 )
                 TextButton(
@@ -444,6 +445,9 @@ private fun LyricsSourceSheet(
         sheetState = sheetState,
         containerColor = BiliPanel,
         contentColor = BiliText,
+        shape = RoundedCornerShape(0.dp),
+        tonalElevation = 0.dp,
+        scrimColor = Color.Black.copy(alpha = 0.55f),
         dragHandle = { BottomSheetDragHandle() },
     ) {
         Column(
@@ -471,7 +475,7 @@ private fun LyricsSourceSheet(
                 ) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(16.dp),
-                        color = BiliPink,
+                        color = BiliPinkText,
                         strokeWidth = 2.dp,
                     )
                     Spacer(Modifier.width(8.dp))
@@ -525,11 +529,11 @@ private fun SourceOptionRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(2.dp))
             .clickable(
                 enabled = available,
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 onClick = onClick,
             )
             .pressScale(interactionSource, pressedScale = 0.985f)
@@ -546,7 +550,7 @@ private fun SourceOptionRow(
                 )
                 if (current) {
                     Spacer(Modifier.width(8.dp))
-                    InfoChip("当前", BiliPink)
+                    InfoChip("当前", BiliPinkText)
                 }
             }
             Spacer(Modifier.height(2.dp))
@@ -566,7 +570,7 @@ private fun SourceOptionRow(
                 else -> "不可用"
             },
             style = MaterialTheme.typography.bodySmall,
-            color = if (available) BiliPink else BiliMuted.copy(alpha = 0.55f),
+            color = if (available) BiliPinkText else BiliMuted.copy(alpha = 0.55f),
         )
     }
 }
@@ -601,7 +605,7 @@ private fun LyricsSearchDialog(
     }
     MotionDialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(0.dp),
             color = BiliPanel,
             border = BorderStroke(1.dp, BiliLine),
             modifier = Modifier
@@ -631,6 +635,7 @@ private fun LyricsSearchDialog(
                     onValueChange = { query = it },
                     singleLine = true,
                     placeholder = { Text("歌名 歌手", color = BiliMuted) },
+                    shape = RoundedCornerShape(2.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(10.dp))
@@ -642,7 +647,7 @@ private fun LyricsSearchDialog(
                     ) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(14.dp),
-                            color = BiliPink,
+                            color = BiliMuted,
                             strokeWidth = 2.dp,
                         )
                         Spacer(Modifier.width(8.dp))
@@ -675,10 +680,10 @@ private fun SearchCandidateRow(candidate: LyricsCandidate, onClick: () -> Unit) 
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(2.dp))
             .clickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 onClick = onClick,
             )
             .pressScale(interactionSource, pressedScale = 0.985f)
@@ -713,7 +718,7 @@ private fun SearchCandidateRow(candidate: LyricsCandidate, onClick: () -> Unit) 
         Spacer(Modifier.width(8.dp))
         InfoChip(
             text = if (candidate.synced) "同步" else "静态",
-            color = if (candidate.synced) BiliBlue else BiliMuted,
+            color = if (candidate.synced) BiliText2 else BiliMuted,
         )
     }
 }
@@ -785,36 +790,42 @@ private fun LyricsLineRow(
 ) {
     val motion = LocalMotion.current
     val color by animateColorAsState(
-        targetValue = if (active) BiliPink else BiliMuted.copy(alpha = 0.78f),
-        animationSpec = motion.tween(220),
+        targetValue = if (active) BiliPinkText else BiliMuted,
+        animationSpec = motion.tween(MotionTokens.Fast),
         label = "lyrics-line-color",
     )
     val interactionSource = remember { MutableInteractionSource() }
     val clickableModifier = if (seekTo != null) {
         Modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(2.dp))
             .clickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 onClickLabel = "跳转到这一句",
                 onClick = seekTo,
             )
     } else {
         Modifier
     }
-    Text(
-        text = line.text.ifBlank { " " },
-        color = color,
-        fontSize = if (active) 20.sp else 15.sp,
-        lineHeight = if (active) 28.sp else 22.sp,
-        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-        textAlign = TextAlign.Center,
-        modifier = Modifier
+    Row(
+        Modifier
             .fillMaxWidth()
             .then(clickableModifier)
-            .pressScale(interactionSource, pressedScale = 0.98f)
+            .pressScale(interactionSource, pressedScale = 0.99f)
             .padding(horizontal = 14.dp, vertical = if (active) 6.dp else 4.dp),
-    )
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = line.text.ifBlank { " " },
+            color = color,
+            fontSize = if (active) 20.sp else 15.sp,
+            lineHeight = if (active) 28.sp else 22.sp,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+            textDecoration = if (active) TextDecoration.Underline else null,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.weight(1f),
+        )
+    }
 }
 
 // ---------------------------------------------------------------- 三态与浮层
@@ -828,8 +839,8 @@ private fun LyricsLoading(modifier: Modifier = Modifier) {
     ) {
         CircularProgressIndicator(
             modifier = Modifier.size(26.dp),
-            color = BiliPink,
-            strokeWidth = 2.5.dp,
+            color = BiliMuted,
+            strokeWidth = 2.dp,
         )
         Spacer(Modifier.height(12.dp))
         Text("正在加载歌词…", style = MaterialTheme.typography.bodySmall, color = BiliMuted)
@@ -878,7 +889,7 @@ private fun LyricsEmpty(
         ) {
             OutlinedButton(
                 onClick = onImport,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(2.dp),
                 border = BorderStroke(1.dp, BiliLine),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
             ) {
@@ -886,10 +897,10 @@ private fun LyricsEmpty(
             }
             Button(
                 onClick = onReload,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(2.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = BiliPink,
-                    contentColor = Color(0xFF1A0A12),
+                    contentColor = BiliOnPink,
                 ),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
             ) {
@@ -903,14 +914,14 @@ private fun LyricsEmpty(
 private fun BackToCurrent(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(50),
+        shape = RoundedCornerShape(2.dp),
         color = BiliPanel2,
         border = BorderStroke(1.dp, BiliLine),
         modifier = modifier,
     ) {
         Text(
             text = "回到当前",
-            color = BiliPink,
+            color = BiliPinkText,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),

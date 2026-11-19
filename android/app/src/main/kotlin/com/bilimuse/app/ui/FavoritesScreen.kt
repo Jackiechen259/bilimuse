@@ -68,7 +68,7 @@ fun FavoritesScreen(
     Box(
         Modifier
             .fillMaxSize()
-            .background(AppBackgroundBrush)
+            .background(BiliBg)
             // 盖住下层的书库列表：点空白处不应穿透到下面的播放按钮
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -194,7 +194,7 @@ private fun FavoritesSummary(
 ) {
     Surface(
         color = BiliPanel2,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(0.dp),
         border = BorderStroke(1.dp, BiliLine),
         modifier = modifier.fillMaxWidth(),
     ) {
@@ -208,7 +208,7 @@ private fun FavoritesSummary(
                     "显示 ${total - hidden} 个 · 隐藏 $hidden 个"
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = if (hidden > 0) BiliPink else BiliMuted,
+                color = if (hidden > 0) BiliPinkText else BiliMuted,
             )
             Spacer(Modifier.height(10.dp))
             Text(
@@ -258,12 +258,12 @@ private fun BulkFolderButton(
     modifier: Modifier = Modifier,
     danger: Boolean = false,
 ) {
-    val accent = if (danger) BiliDanger else BiliPink
+    val accent = if (danger) BiliDanger else BiliText2
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(0.dp),
         border = BorderStroke(
             width = 1.dp,
             color = if (enabled) accent.copy(alpha = 0.45f) else BiliLine,
@@ -289,7 +289,7 @@ private fun FolderListCard(
 ) {
     Surface(
         color = BiliPanel,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(0.dp),
         border = BorderStroke(1.dp, BiliLine),
         modifier = modifier.fillMaxWidth(),
     ) {
@@ -328,7 +328,7 @@ private fun LoadingState() {
             .padding(vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        CircularProgressIndicator(color = BiliPink, strokeWidth = 2.5.dp)
+        CircularProgressIndicator(color = BiliMuted, strokeWidth = 2.dp)
         Spacer(Modifier.height(14.dp))
         Text(
             text = "正在读取收藏夹…",
@@ -342,7 +342,7 @@ private fun LoadingState() {
 private fun LoginPrompt(onLogin: () -> Unit) {
     Surface(
         color = BiliPanel,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(0.dp),
         border = BorderStroke(1.dp, BiliLine),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -365,7 +365,7 @@ private fun LoginPrompt(onLogin: () -> Unit) {
                 onClick = onLogin,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = BiliPink,
-                    contentColor = Color(0xFF1A0A12),
+                    contentColor = BiliOnPink,
                 ),
             ) { Text("登录 B 站") }
         }
@@ -376,7 +376,7 @@ private fun LoginPrompt(onLogin: () -> Unit) {
 private fun EmptyState(demo: Boolean, onRefresh: () -> Unit) {
     Surface(
         color = BiliPanel,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(0.dp),
         border = BorderStroke(1.dp, BiliLine),
         modifier = Modifier.fillMaxWidth(),
     ) {

@@ -68,6 +68,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
@@ -124,8 +125,6 @@ fun NowPlayingScreen(
 ) {
     val motion = LocalMotion.current
     var queueOpen by rememberSaveable { mutableStateOf(false) }
-    val accent = rememberCoverAccent(state.cover)
-    val tilt = rememberCoverTilt(enabled = state.isPlaying)
 
     // 歌词打开时系统返回键先收起歌词，而不是直接退出播放页。
     BackHandler(enabled = lyrics.open) { onCloseLyrics() }
@@ -133,15 +132,13 @@ fun NowPlayingScreen(
     Box(
         Modifier
             .fillMaxSize()
-            .background(AppBackgroundBrush)
+            .background(BiliBg)
             // 盖住下层迷你播放器：点空白处不应穿透到下面的按钮
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
             ) { },
     ) {
-        AuroraGlow(accent.color, Modifier.fillMaxSize())
-
         Column(
             Modifier
                 .fillMaxSize()
@@ -154,7 +151,6 @@ fun NowPlayingScreen(
             NowPlayingTopBar(
                 state = state,
                 queue = queue,
-                accent = accent.color,
                 lyricsOpen = lyrics.open,
                 onBack = onBack,
                 onOpenQueue = { queueOpen = true },
@@ -166,14 +162,8 @@ fun NowPlayingScreen(
             AnimatedContent(
                 targetState = lyrics.open,
                 transitionSpec = {
-                    (fadeIn(motion.tween(MotionTokens.Base, easing = MotionEase.OutExpo)) + scaleIn(
-                        initialScale = 0.985f,
-                        animationSpec = motion.tween(280, easing = MotionEase.OutQuart),
-                    )).togetherWith(
-                        fadeOut(motion.tween(MotionTokens.Fast)) + scaleOut(
-                            targetScale = 0.99f,
-                            animationSpec = motion.tween(200, easing = MotionEase.In),
-                        ),
+                    fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
+                        fadeOut(motion.tween(MotionTokens.Fast)),
                     )
                 },
                 contentAlignment = Alignment.TopCenter,
@@ -212,8 +202,7 @@ fun NowPlayingScreen(
                     ) {
                         CoverHero(
                             cover = state.cover,
-                            accent = accent,
-                            tilt = tilt,
+                            playing = state.isPlaying,
                             modifier = Modifier
                                 .fillMaxWidth(0.82f)
                                 .widthIn(max = 360.dp)
@@ -235,7 +224,6 @@ fun NowPlayingScreen(
 
             SeekSection(
                 state = state,
-                accent = accent.color,
                 onSeek = onSeek,
                 modifier = Modifier.staggerIn(index = 3, distance = 10.dp),
             )
@@ -244,7 +232,6 @@ fun NowPlayingScreen(
 
             Controls(
                 state = state,
-                accent = accent.color,
                 onTogglePlay = onTogglePlay,
                 onNext = onNext,
                 onPrevious = onPrevious,
@@ -265,14 +252,8 @@ fun NowPlayingScreen(
 
             AnimatedVisibility(
                 visible = showBtrDetails,
-                enter = expandVertically(
-                    expandFrom = Alignment.Top,
-                    animationSpec = motion.spring(dampingRatio = 0.9f, stiffness = 300f),
-                ) + fadeIn(motion.tween(220)),
-                exit = shrinkVertically(
-                    shrinkTowards = Alignment.Top,
-                    animationSpec = motion.tween(260, easing = MotionEase.InOut),
-                ) + fadeOut(motion.tween(160)),
+                enter = fadeIn(motion.tween(MotionTokens.Base)),
+                exit = fadeOut(motion.tween(MotionTokens.Fast)),
             ) {
                 Column {
                     EngineCard(state)
@@ -315,7 +296,6 @@ fun NowPlayingScreen(
 private fun NowPlayingTopBar(
     state: PlayerUiState,
     queue: PlayQueueUiState,
-    accent: Color,
     lyricsOpen: Boolean,
     onBack: () -> Unit,
     onOpenQueue: () -> Unit,
@@ -353,7 +333,6 @@ private fun NowPlayingTopBar(
         ) {
             LyricsToggleButton(
                 active = lyricsOpen,
-                accent = accent,
                 onClick = onToggleLyrics,
             )
             AnimatedVisibility(
@@ -368,7 +347,7 @@ private fun NowPlayingTopBar(
                 ),
             ) {
                 Box(Modifier.padding(end = 2.dp)) {
-                    InfoChip(quality, accent)
+                    InfoChip(quality, BiliText2)
                 }
             }
             MotionIconButton(
@@ -387,22 +366,16 @@ private fun NowPlayingTopBar(
     }
 }
 
-/** 顶栏「词」开关：打开时主色描边高亮，和网页版 `#np-lyrics-btn` 的 aria-pressed 一致。 */
+/** 顶栏「词」开关：选中时中性底 + 2dp 粉色底线。 */
 @Composable
 private fun LyricsToggleButton(
     active: Boolean,
-    accent: Color,
     onClick: () -> Unit,
 ) {
     val motion = LocalMotion.current
-    val background by animateColorAsState(
-        targetValue = if (active) accent.copy(alpha = 0.16f) else Color.Transparent,
-        animationSpec = motion.tween(200),
-        label = "lyrics-toggle-bg",
-    )
     val tint by animateColorAsState(
-        targetValue = if (active) accent else BiliMuted,
-        animationSpec = motion.tween(200),
+        targetValue = if (active) BiliPinkText else BiliMuted,
+        animationSpec = motion.tween(MotionTokens.Fast),
         label = "lyrics-toggle-tint",
     )
     MotionIconButton(
@@ -414,15 +387,22 @@ private fun LyricsToggleButton(
         Box(
             Modifier
                 .size(32.dp)
-                .clip(CircleShape)
-                .background(background),
+                .clip(RoundedCornerShape(2.dp))
+                .background(if (active) BiliSelected else Color.Transparent),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = "词",
                 color = tint,
                 fontSize = 15.sp,
-                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                fontWeight = FontWeight.Bold,
+            )
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .background(if (active) BiliPinkStrong else Color.Transparent),
             )
         }
     }
@@ -431,56 +411,32 @@ private fun LyricsToggleButton(
 @Composable
 private fun CoverHero(
     cover: String,
-    accent: CoverAccent,
-    tilt: CoverTiltState,
+    playing: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val motion = LocalMotion.current
-    val shape = RoundedCornerShape(26.dp)
-    val sheen = remember(cover) { Animatable(0f) }
-    val currentCover = cover
-
-    LaunchedEffect(cover, motion.enabled) {
-        if (!motion.enabled) return@LaunchedEffect
-        sheen.snapTo(0f)
-        delay(160)
-        sheen.animateTo(
-            targetValue = 1f,
-            animationSpec = androidx.compose.animation.core.tween(
-                durationMillis = 820,
-                easing = MotionEase.OutQuart,
-            ),
-        )
-    }
-
+    val shape = RoundedCornerShape(0.dp)
+    val spine = BiliPinkStrong
     Box(
         modifier
-            .coverTilt(tilt)
-            .shadow(
-                elevation = 28.dp,
-                shape = shape,
-                ambientColor = accent.color.copy(alpha = 0.3f),
-                spotColor = accent.color.copy(alpha = 0.36f),
-                clip = false,
-            )
             .clip(shape)
-            .background(BiliPanel)
-            .background(CoverFallbackBrush),
+            .background(BiliPink)
+            .border(1.dp, BiliLine, shape)
+            .drawBehind {
+                if (playing) {
+                    drawRect(
+                        color = spine,
+                        size = Size(2.dp.toPx(), size.height),
+                    )
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         AnimatedContent(
             targetState = cover,
             transitionSpec = {
-                (fadeIn(motion.tween(420, delayMs = 60, easing = MotionEase.OutExpo)) +
-                    scaleIn(
-                        initialScale = 1.035f,
-                        animationSpec = motion.tween(700, easing = MotionEase.OutQuart),
-                    )).togetherWith(
-                    fadeOut(motion.tween(320, easing = MotionEase.InOut)) +
-                        scaleOut(
-                            targetScale = 0.99f,
-                            animationSpec = motion.tween(420, easing = MotionEase.InOut),
-                        ),
+                fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
+                    fadeOut(motion.tween(MotionTokens.Fast)),
                 )
             },
             contentAlignment = Alignment.Center,
@@ -491,7 +447,7 @@ private fun CoverHero(
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                         text = "♪",
-                        color = Color.White.copy(alpha = 0.92f),
+                        color = BiliOnPink,
                         fontSize = 76.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -502,45 +458,9 @@ private fun CoverHero(
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
-                    onSuccess = { result ->
-                        // 交叉溶解期间旧封面可能晚到，只接受当前曲目的回调。
-                        if (animatedCover == currentCover) {
-                            accent.onCoverLoaded(result.result.drawable)
-                        }
-                    },
                 )
             }
         }
-
-        // 随倾斜移动的高光 + 环境光；绘制阶段读取传感器状态，不触发重组。
-        Box(Modifier.matchParentSize().coverGlare(tilt, accent.color))
-
-        if (motion.enabled) {
-            Box(
-                Modifier
-                    .matchParentSize()
-                    .graphicsLayer {
-                        translationX = ((sheen.value * 3f) - 1.5f) * size.width
-                        alpha = (1f - abs(sheen.value * 2f - 1f)).coerceIn(0f, 1f)
-                        rotationZ = 18f
-                    }
-                    .background(
-                        Brush.linearGradient(
-                            listOf(
-                                Color.Transparent,
-                                Color.White.copy(alpha = 0.16f),
-                                Color.Transparent,
-                            ),
-                        ),
-                    ),
-            )
-        }
-
-        Box(
-            Modifier
-                .matchParentSize()
-                .border(1.dp, Color.White.copy(alpha = 0.08f), shape),
-        )
     }
 }
 
@@ -553,14 +473,8 @@ private fun TrackTitles(state: PlayerUiState, modifier: Modifier = Modifier) {
         AnimatedContent(
             targetState = title,
             transitionSpec = {
-                (fadeIn(motion.tween(300, easing = MotionEase.OutExpo)) + slideInVertically(
-                    initialOffsetY = { it / 3 },
-                    animationSpec = motion.tween(380, easing = MotionEase.OutExpo),
-                )).togetherWith(
-                    fadeOut(motion.tween(150)) + slideOutVertically(
-                        targetOffsetY = { -it / 4 },
-                        animationSpec = motion.tween(200, easing = MotionEase.In),
-                    ),
+                fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
+                    fadeOut(motion.tween(MotionTokens.Fast)),
                 )
             },
             contentAlignment = Alignment.Center,
@@ -579,14 +493,8 @@ private fun TrackTitles(state: PlayerUiState, modifier: Modifier = Modifier) {
         AnimatedContent(
             targetState = artist,
             transitionSpec = {
-                (fadeIn(motion.tween(340, delayMs = 40)) + slideInVertically(
-                    initialOffsetY = { it / 4 },
-                    animationSpec = motion.tween(380, easing = MotionEase.OutExpo),
-                )).togetherWith(
-                    fadeOut(motion.tween(160)) + slideOutVertically(
-                        targetOffsetY = { -it / 4 },
-                        animationSpec = motion.tween(200, easing = MotionEase.In),
-                    ),
+                fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
+                    fadeOut(motion.tween(MotionTokens.Fast)),
                 )
             },
             contentAlignment = Alignment.Center,
@@ -609,11 +517,12 @@ private fun TrackTitles(state: PlayerUiState, modifier: Modifier = Modifier) {
 @Composable
 private fun SeekSection(
     state: PlayerUiState,
-    accent: Color,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val motion = LocalMotion.current
+    val accent = BiliPinkStrong
+    val trackColor = BiliTrack
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
     val duration = state.durationMs.coerceAtLeast(0L)
@@ -641,7 +550,7 @@ private fun SeekSection(
     )
     val dragScale by animateFloatAsState(
         targetValue = if (dragging) 1.08f else 1f,
-        animationSpec = motion.spring(dampingRatio = 0.55f, stiffness = 620f),
+        animationSpec = motion.tween(MotionTokens.Fast),
         label = "seek-drag-scale",
     )
 
@@ -664,41 +573,19 @@ private fun SeekSection(
             colors = SliderDefaults.colors(
                 thumbColor = accent,
                 activeTrackColor = accent,
-                inactiveTrackColor = BiliLine,
+                inactiveTrackColor = BiliTrack,
                 activeTickColor = Color.Transparent,
                 inactiveTickColor = Color.Transparent,
             ),
             thumb = {
-                val halo by animateFloatAsState(
-                    targetValue = if (dragging) 1f else 0f,
-                    animationSpec = motion.tween(180),
-                    label = "seek-halo",
-                )
-                Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
-                    if (halo > 0.01f) {
-                        Box(
-                            Modifier
-                                .size(22.dp)
-                                .graphicsLayer {
-                                    scaleX = halo
-                                    scaleY = halo
-                                }
-                                .background(accent.copy(alpha = 0.2f), CircleShape),
-                        )
-                    }
+                Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
                     Box(
                         Modifier
-                            .size(14.dp)
+                            .size(10.dp)
                             .graphicsLayer {
                                 scaleX = dragScale
                                 scaleY = dragScale
                             }
-                            .shadow(
-                                elevation = 10.dp,
-                                shape = CircleShape,
-                                ambientColor = accent,
-                                spotColor = accent,
-                            )
                             .background(accent, CircleShape),
                     )
                 }
@@ -715,23 +602,17 @@ private fun SeekSection(
                     Canvas(
                         Modifier
                             .fillMaxWidth()
-                            .height(6.dp),
+                            .height(2.dp),
                     ) {
-                        val radius = size.height / 2f
-                        drawRoundRect(
-                            color = BiliLine,
+                        drawRect(
+                            color = trackColor,
                             size = size,
-                            cornerRadius = CornerRadius(radius, radius),
                         )
                         val active = size.width * sliderState.value.coerceIn(0f, 1f)
                         if (active > 0.5f) {
-                            drawRoundRect(
-                                brush = Brush.horizontalGradient(
-                                    colors = listOf(accent.copy(alpha = 0.72f), accent),
-                                    endX = size.width.coerceAtLeast(1f),
-                                ),
+                            drawRect(
+                                color = accent,
                                 size = Size(active, size.height),
-                                cornerRadius = CornerRadius(radius, radius),
                             )
                         }
                     }
@@ -757,7 +638,7 @@ private fun SeekSection(
             Text(
                 text = if (state.isBuffering) "缓冲中…" else formatTime(duration),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (state.isBuffering) BiliBlue else BiliMuted,
+                color = if (state.isBuffering) BiliMuted else BiliMuted,
             )
         }
     }
@@ -766,7 +647,6 @@ private fun SeekSection(
 @Composable
 private fun Controls(
     state: PlayerUiState,
-    accent: Color,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
@@ -775,6 +655,7 @@ private fun Controls(
     modifier: Modifier = Modifier,
 ) {
     val motion = LocalMotion.current
+    val accent = BiliPink
     val shuffleColor by animateColorAsState(
         targetValue = if (state.shuffle) accent else BiliMuted,
         animationSpec = motion.tween(220),
@@ -812,7 +693,6 @@ private fun Controls(
         }
         PlayPauseButton(
             isPlaying = state.isPlaying,
-            accent = accent,
             onClick = onTogglePlay,
         )
         MotionIconButton(
@@ -844,14 +724,8 @@ private fun Controls(
             AnimatedContent(
                 targetState = state.repeatMode,
                 transitionSpec = {
-                    (fadeIn(motion.tween(170)) + scaleIn(
-                        initialScale = 0.55f,
-                        animationSpec = motion.spring(dampingRatio = 0.55f, stiffness = 720f),
-                    )).togetherWith(
-                        fadeOut(motion.tween(120)) + scaleOut(
-                            targetScale = 0.55f,
-                            animationSpec = motion.tween(120, easing = MotionEase.In),
-                        ),
+                    fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
+                        fadeOut(motion.tween(MotionTokens.Fast)),
                     )
                 },
                 label = "repeat-glyph",
@@ -876,72 +750,28 @@ private fun Controls(
 @Composable
 private fun PlayPauseButton(
     isPlaying: Boolean,
-    accent: Color,
     onClick: () -> Unit,
 ) {
     val motion = LocalMotion.current
+    val accent = BiliPink
     val interactionSource = remember { MutableInteractionSource() }
-    val halo: State<Float>? = if (motion.enabled && isPlaying) {
-        val transition = rememberInfiniteTransition(label = "play-halo")
-        transition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = androidx.compose.animation.core.tween(
-                    durationMillis = 2600,
-                    easing = FastOutSlowInEasing,
-                ),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "play-halo-progress",
-        )
-    } else {
-        null
-    }
-
-    Box(Modifier.size(100.dp), contentAlignment = Alignment.Center) {
-        if (halo != null) {
-            Canvas(Modifier.fillMaxSize()) {
-                val progress = halo.value
-                val radius = size.minDimension * (0.27f + progress * 0.2f)
-                drawCircle(
-                    color = accent.copy(alpha = (1f - progress) * 0.22f),
-                    radius = radius,
-                )
-                drawCircle(
-                    color = accent.copy(alpha = (1f - progress) * 0.08f),
-                    radius = radius * 0.82f,
-                )
-            }
-        }
+    Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
         Surface(
             onClick = onClick,
             shape = CircleShape,
             color = accent,
-            contentColor = Color(0xFF1A0A12),
+            contentColor = BiliOnPink,
             interactionSource = interactionSource,
             modifier = Modifier
-                .size(72.dp)
-                .pressScale(interactionSource, pressedScale = 0.9f)
-                .shadow(
-                    elevation = 18.dp,
-                    shape = CircleShape,
-                    ambientColor = accent.copy(alpha = 0.7f),
-                    spotColor = accent,
-                ),
+                .size(64.dp)
+                .pressScale(interactionSource, pressedScale = 0.94f),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 AnimatedContent(
                     targetState = isPlaying,
                     transitionSpec = {
-                        (fadeIn(motion.tween(150)) + scaleIn(
-                            initialScale = 0.5f,
-                            animationSpec = motion.spring(dampingRatio = 0.5f, stiffness = 780f),
-                        )).togetherWith(
-                            fadeOut(motion.tween(110)) + scaleOut(
-                                targetScale = 0.5f,
-                                animationSpec = motion.tween(110, easing = MotionEase.In),
-                            ),
+                        fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
+                            fadeOut(motion.tween(MotionTokens.Fast)),
                         )
                     },
                     label = "play-glyph",
@@ -951,8 +781,8 @@ private fun PlayPauseButton(
                             if (playing) R.drawable.ic_pause else R.drawable.ic_play,
                         ),
                         contentDescription = if (playing) "暂停" else "播放",
-                        tint = Color(0xFF1A0A12),
-                        modifier = Modifier.size(34.dp),
+                        tint = BiliOnPink,
+                        modifier = Modifier.size(30.dp),
                     )
                 }
             }
@@ -971,7 +801,7 @@ private fun ShuffleScopeHint(pool: ShufflePoolState, modifier: Modifier = Modifi
             pool.preparing -> {
                 CircularProgressIndicator(
                     modifier = Modifier.size(12.dp),
-                    color = BiliPink,
+                    color = BiliMuted,
                     strokeWidth = 1.5.dp,
                 )
                 Spacer(Modifier.size(6.dp))
@@ -1022,7 +852,7 @@ private fun EngineCard(state: PlayerUiState) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = BiliPanel,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(0.dp),
         border = BorderStroke(1.dp, BiliLine),
     ) {
         Column(Modifier.padding(16.dp)) {
@@ -1031,8 +861,8 @@ private fun EngineCard(state: PlayerUiState) {
                 Spacer(Modifier.size(8.dp))
                 when {
                     engine == null -> InfoChip("解析中", BiliMuted)
-                    engine.mode == "btr" -> InfoChip("BTR", BiliPink)
-                    else -> InfoChip("单连接", BiliBlue)
+                    engine.mode == "btr" -> InfoChip("BTR", BiliText2)
+                    else -> InfoChip("单连接", BiliMuted)
                 }
                 Spacer(Modifier.weight(1f))
                 if (engine != null) {
@@ -1048,7 +878,7 @@ private fun EngineCard(state: PlayerUiState) {
                 engine == null -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(16.dp),
-                        color = BiliPink,
+                        color = BiliMuted,
                         strokeWidth = 2.dp,
                     )
                     Spacer(Modifier.size(10.dp))
@@ -1087,7 +917,7 @@ private fun BtrDetails(engine: EngineSnapshot, resetKey: Any?) {
             Metric("重试", "${engine.retries}", Modifier.weight(1f))
         }
         Spacer(Modifier.height(12.dp))
-        ProgressLine(engine.progress.toFloat(), resetKey = resetKey)
+        ProgressLine(engine.progress.toFloat(), color = BiliMuted, resetKey = resetKey)
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth()) {
             Text(
@@ -1099,7 +929,7 @@ private fun BtrDetails(engine: EngineSnapshot, resetKey: Any?) {
             Text(
                 formatSpeed(engine.recentSpeed),
                 style = MaterialTheme.typography.bodySmall,
-                color = BiliPink,
+                color = BiliText2,
                 fontWeight = FontWeight.Medium,
             )
         }
@@ -1141,12 +971,12 @@ private fun SingleDetails(engine: EngineSnapshot, resetKey: Any?) {
             Text(
                 formatSpeed(engine.recentSpeed),
                 style = MaterialTheme.typography.bodySmall,
-                color = BiliBlue,
+                color = BiliMuted,
                 fontWeight = FontWeight.Medium,
             )
         }
         Spacer(Modifier.height(8.dp))
-        ProgressLine(engine.progress.toFloat(), color = BiliBlue, resetKey = resetKey)
+        ProgressLine(engine.progress.toFloat(), color = BiliMuted, resetKey = resetKey)
         Spacer(Modifier.height(8.dp))
         Text(
             "已读取 ${formatSize(engine.bytesDone)}",

@@ -225,12 +225,13 @@ B 站标题是给人看的，不是给曲库搜的（实测 `【纯享版】孤�
   `.is-active` 类，不重建列表。
 - 自动滚动把当前行居中；`prefers-reduced-motion` 时用 `behavior: 'auto'`。
 - 用户手动滚动时暂停跟随并显示「回到当前」；点它或切歌后恢复。
-- 当前行字号 `clamp(20px, 2.6vw, 30px)`，其余行降到 45% 不透明度；上下边缘渐隐。
+- 当前行字号 `clamp(20px, 2.4vw, 26px)`、700 字重、`--accent-text` 颜色，并带 2px 粉色
+  下划线；非当前行用 `--muted` 全不透明。上下用 1px 细线收边，不再用渐隐遮罩。
 - 点击某行把播放位置跳到 `t + offset`。
 - 空状态按 `reason` 给不同文案与按钮：导入 LRC / 在线搜索 / 重试 / 去登录。
 - 工具栏：来源标签、匹配信息（歌名 · 歌手）、偏移控件、换源、搜索、导入。
 - 搜索面板：预填清洗后的「歌名 歌手」，列出 LRCLIB 候选，点「用这条」后锁定。
-- 切换封面/歌词用 180ms 交叉淡入 + 轻微缩放；系统要求减少动态效果时直接切换。
+- 切换封面/歌词只做 180ms 淡入淡出；系统要求减少动态效果时直接切换。
 - `Esc` 顺序：传输详情 → 覆盖式队列 → 歌词搜索面板 → 歌词视图 → 详情页。
 
 新增状态（`app.js` 的 `state`）：`lyrics`、`lyricsOpen`、`lyricsLoading`、`lyricsError`、
@@ -240,7 +241,8 @@ B 站标题是给人看的，不是给曲库搜的（实测 `【纯享版】孤�
 
 - `NowPlayingScreen` 顶部工具区加「词」按钮；开启后用 `LyricsPanel` 替换
   `CoverHero` 与 `TrackTitles`，`SeekSection` / `Controls` 保持可见。
-- `LyricsPanel`：`LazyColumn`，当前行居中放大，`animateScrollToItem(index, -视口高/2)`；
+- `LyricsPanel`：`LazyColumn`，当前行居中放大并带 2dp 粉色下划线，其余行 `BiliMuted`
+  全不透明；`animateScrollToItem(index, -视口高/2)`；
   用户拖动时暂停跟随并显示「回到当前」；点行 seek；加载 / 空 / 错误三态；
   工具行含来源标签、匹配信息、偏移、导入、换源、搜索、重试、收起（换源用
   `ModalBottomSheet` 列 `sources`，搜索用对话框调 `search` 再 `useCandidate`）。
@@ -309,7 +311,7 @@ TV 布局、改动 BTR 与音轨选择。
   `lyricsApplyResult` / `lyricsBuildLines` / `lyricsUpdateActive` / `lyricsCenterActive` /
   `lyricsSeekTo` / `lyricsNudgeOffset` / `lyricsReadFile` / `lyricsOpenSearch` /
   `lyricsToggleSources` 等）与 `state.lyrics*` 字段；
-- `bilimuse/web/style.css`：歌词区布局、活动行、上下渐隐、空态与响应式规则（`np-lyrics*`）。
+- `bilimuse/web/style.css`：歌词区布局、活动行（粉色下划线）、上下细线、空态与响应式规则（`np-lyrics*`）。
 
 安卓：
 

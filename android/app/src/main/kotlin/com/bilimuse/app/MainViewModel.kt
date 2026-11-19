@@ -18,6 +18,7 @@ import com.bilimuse.app.data.LyricsResult
 import com.bilimuse.app.data.LyricsSourceOption
 import com.bilimuse.app.data.NotLoggedInException
 import com.bilimuse.app.data.QrInfo
+import com.bilimuse.app.ui.AppTheme
 import com.bilimuse.app.data.QrPollResult
 import com.bilimuse.app.data.StreamRegistry
 import com.bilimuse.app.data.TrackItem
@@ -927,6 +928,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setShowBtrDetails(enabled: Boolean) {
         settingsStore.setShowBtrDetails(enabled)
+    }
+
+    fun setTheme(theme: AppTheme) {
+        if (settingsStore.settings.value.theme == theme.key) return
+        settingsStore.setTheme(theme.key)
     }
 
     fun setMotionEnabled(enabled: Boolean) {

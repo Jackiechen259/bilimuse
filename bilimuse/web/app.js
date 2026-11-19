@@ -57,7 +57,7 @@ const DEFAULT_PREFERENCES = { volume: 0.9, autoplayNext: true };
    这里同时缓存一份到 localStorage，让 <head> 的内联脚本首帧就能上色。 */
 const THEME_KEY = 'bilimuse.theme';
 const THEMES = ['ink', 'paper', 'cream'];
-const THEME_COLORS = { ink: '#0b0b0c', paper: '#f4f1ea', cream: '#ebe0cd' };
+const THEME_COLORS = { ink: '#111114', paper: '#ffffff', cream: '#f2ebdf' };
 let themePersistTimer = null;
 
 function currentTheme() {
@@ -99,12 +99,8 @@ function initTheme() {
   applyTheme(THEMES.includes(preset) ? preset : theme, { persist: false });
 }
 
-/* 主题切换的「圆形揭示」：从被点击的圆点 / 卡片向外扩散。
-   View Transitions 在 Chromium 111+（桌面壳的 WebView2）可用；
-   WKWebView / 旧 WebKit 没有就退回瞬时切换，不影响任何功能。 */
-let themeTransition = null;
-
-function chooseTheme(theme, sourceEl) {
+/* 主题切换：扁平语言下只做一次短促交叉淡入，不再做圆形揭示。 */
+function chooseTheme(theme) {
   if (!THEMES.includes(theme) || theme === currentTheme()) return;
   const fallback = () => {
     applyTheme(theme);
@@ -114,50 +110,11 @@ function chooseTheme(theme, sourceEl) {
     fallback();
     return;
   }
-  if (themeTransition) {
-    try { themeTransition.skipTransition(); } catch (_) { /* 已经结束 */ }
-    themeTransition = null;
-  }
-
-  const rect = sourceEl && typeof sourceEl.getBoundingClientRect === 'function'
-    ? sourceEl.getBoundingClientRect()
-    : null;
-  const x = rect && rect.width ? rect.left + rect.width / 2 : window.innerWidth / 2;
-  const y = rect && rect.height ? rect.top + rect.height / 2 : window.innerHeight / 2;
-  const radius = Math.ceil(Math.hypot(
-    Math.max(x, window.innerWidth - x),
-    Math.max(y, window.innerHeight - y),
-  ));
-
-  let transition;
   try {
-    transition = document.startViewTransition(() => {
-      applyTheme(theme);
-      persistTheme(theme);
-    });
+    document.startViewTransition(fallback);
   } catch (_) {
     fallback();
-    return;
   }
-  themeTransition = transition;
-  transition.ready.then(() => {
-    document.documentElement.animate(
-      {
-        clipPath: [
-          `circle(0px at ${x}px ${y}px)`,
-          `circle(${radius}px at ${x}px ${y}px)`,
-        ],
-      },
-      {
-        duration: 560,
-        easing: MOTION_EASE_OUT,
-        pseudoElement: '::view-transition-new(root)',
-      },
-    );
-  }).catch(() => { /* 过渡被打断 */ });
-  transition.finished.catch(() => { /* 更新回调失败或被打断 */ }).finally(() => {
-    if (themeTransition === transition) themeTransition = null;
-  });
 }
 
 const SETTINGS_TABS = {
@@ -1283,14 +1240,6 @@ function syncPlayButton() {
   btn.title = playing ? '暂停（Space）' : '播放（Space）';
 }
 
-/** 播放 / 暂停时给两个播放键一枚向外散开的涟漪。 */
-function pulsePlayControls() {
-  if (!motionAllowed()) return;
-  [$('play'), $('np-play')].forEach((btn) => {
-    if (btn) restartClass(btn, 'is-pulsing', 680);
-  });
-}
-
 function playNext(step = 1) {
   if (state.shuffle && state.queueShuffled && state.queue.length) {
     let pos = state.queuePos;
@@ -1512,7 +1461,6 @@ let npUnderTimer = null;
 function npApplyCover(cover) {
   const art = $('np-art-cover');
   const under = $('np-art-cover-under');
-  const ambient = $('np-ambient');
   const swap = npPendingTrackSwap;
   npPendingTrackSwap = false;
   const next = cover || '';
@@ -1536,16 +1484,10 @@ function npApplyCover(cover) {
   }
   art.style.backgroundImage = '';
   art.classList.toggle('is-empty', !previous);
-  if (!previous) {
-    ambient.classList.add('is-empty');
-    ambient.style.backgroundImage = '';
-  }
 
   if (!cover) {
     npCoverLoading = null;
     art.classList.add('is-empty');
-    ambient.classList.add('is-empty');
-    ambient.style.backgroundImage = '';
     if (under) under.style.backgroundImage = '';
     return;
   }
@@ -1555,15 +1497,11 @@ function npApplyCover(cover) {
     if (!src) {
       art.classList.add('is-empty');
       art.style.backgroundImage = '';
-      ambient.classList.add('is-empty');
-      ambient.style.backgroundImage = '';
       if (under) under.style.backgroundImage = '';
       return;
     }
     art.classList.remove('is-empty');
     art.style.backgroundImage = `url(${src})`;
-    ambient.classList.remove('is-empty');
-    ambient.style.backgroundImage = `url(${src})`;
     if (swap && !npEntering) npAnimateTrackSwap({ cover: true, text: false });
     clearTimeout(npUnderTimer);
     npUnderTimer = setTimeout(() => {
@@ -1573,28 +1511,8 @@ function npApplyCover(cover) {
   });
 }
 
-/** 切歌：文案逐行浮入；封面就绪后再从柔焦里显影，环境光换一口气。 */
-function npAnimateTrackSwap({ cover = false, text = true } = {}) {
-  if (!npOpen() || !motionAllowed()) return;
-  const overlay = $('now-playing');
-  if (text) {
-    const line = overlay.querySelector('.np-trackline');
-    if (line) {
-      Array.from(line.children).forEach((el, i) => {
-        el.style.setProperty('--line-i', String(i));
-      });
-      restartClass(line, 'is-swapping', 780);
-    }
-  }
-  if (cover) {
-    const art = $('np-art-cover');
-    if (art && !art.classList.contains('is-empty')) restartClass(art, 'is-swapping', 700);
-    const ambient = $('np-ambient');
-    if (ambient && !ambient.classList.contains('is-empty')) {
-      restartClass(ambient, 'is-swapping', 1000);
-    }
-  }
-}
+/** 扁平语言下切歌不再做柔焦/换气动画，封面直接交叉溶解。 */
+function npAnimateTrackSwap() {}
 
 function npRenderInfo() {
   if (!npOpen()) return;
@@ -2059,8 +1977,8 @@ function npRenderAll() {
    动效全部走 Web Animations API，桌面壳（WebView2）和浏览器表现一致；
    系统启用「减少动态效果」时跳过，直接显示 / 隐藏。 */
 
-const NP_ENTER_MS = 420;
-const NP_LEAVE_MS = 260;
+const NP_ENTER_MS = 200;
+const NP_LEAVE_MS = 160;
 const NP_MOTION_EASE = 'cubic-bezier(0.22, 0.9, 0.26, 1)';
 
 let npMotionToken = 0;
@@ -2125,135 +2043,11 @@ function npTrackMotion(anim) {
   return anim;
 }
 
-/* 指针视差：环境光跟着鼠标缓慢偏移；悬停封面时做 3D 倾斜 + 高光。
-   只在鼠标（不是触摸）、桌面壳允许动效、详情页稳定展示时启用。 */
-function npResetPointer() {
-  npTiltX = 0;
-  npTiltY = 0;
-  npGlareX = 50;
-  npGlareY = 50;
-  npAmbientX = 0;
-  npAmbientY = 0;
-  npArtRect = null;
-  npPointerDirty = false;
-  if (npPointerRaf) {
-    cancelAnimationFrame(npPointerRaf);
-    npPointerRaf = 0;
-  }
-  const overlay = $('now-playing');
-  if (!overlay) return;
-  overlay.classList.remove('np-tilt-live', 'np-ambient-live');
-  overlay.style.setProperty('--np-tilt-x', '0deg');
-  overlay.style.setProperty('--np-tilt-y', '0deg');
-  overlay.style.setProperty('--np-glare-x', '50%');
-  overlay.style.setProperty('--np-glare-y', '50%');
-  overlay.style.setProperty('--np-ambient-x', '0px');
-  overlay.style.setProperty('--np-ambient-y', '0px');
-}
+/* 扁平语言下不再做指针视差 / 封面倾斜；保留空实现供关闭流程调用。 */
+function npResetPointer() {}
 
-function npFlushPointer() {
-  npPointerRaf = 0;
-  if (!npPointerDirty) return;
-  npPointerDirty = false;
-  const overlay = $('now-playing');
-  if (!overlay) return;
-  overlay.style.setProperty('--np-tilt-x', `${npTiltX.toFixed(2)}deg`);
-  overlay.style.setProperty('--np-tilt-y', `${npTiltY.toFixed(2)}deg`);
-  overlay.style.setProperty('--np-glare-x', `${npGlareX.toFixed(1)}%`);
-  overlay.style.setProperty('--np-glare-y', `${npGlareY.toFixed(1)}%`);
-  overlay.style.setProperty('--np-ambient-x', `${npAmbientX.toFixed(2)}px`);
-  overlay.style.setProperty('--np-ambient-y', `${npAmbientY.toFixed(2)}px`);
-}
-
-function npQueuePointerFrame() {
-  npPointerDirty = true;
-  if (!npPointerRaf) npPointerRaf = requestAnimationFrame(npFlushPointer);
-}
-
-function setupNpPointer() {
-  const overlay = $('now-playing');
-  const art = $('np-art');
-  if (!overlay || !art) return;
-
-  const pointerReady = (evt) => (
-    evt.pointerType === 'mouse'
-    && npOpen()
-    && !npClosing
-    && !npEntering
-    && motionAllowed()
-  );
-
-  overlay.addEventListener('pointermove', (evt) => {
-    if (!pointerReady(evt)) return;
-    const nx = evt.clientX / Math.max(1, window.innerWidth) - 0.5;
-    const ny = evt.clientY / Math.max(1, window.innerHeight) - 0.5;
-    npAmbientX = -nx * 18;
-    npAmbientY = -ny * 12;
-    overlay.classList.add('np-ambient-live');
-    npQueuePointerFrame();
-  }, { passive: true });
-
-  overlay.addEventListener('pointerleave', () => {
-    npAmbientX = 0;
-    npAmbientY = 0;
-    overlay.classList.remove('np-ambient-live');
-    npQueuePointerFrame();
-  });
-
-  const measureArt = () => {
-    npArtRect = art.getBoundingClientRect();
-  };
-  art.addEventListener('pointerenter', measureArt, { passive: true });
-  window.addEventListener('resize', () => { npArtRect = null; }, { passive: true });
-
-  art.addEventListener('pointermove', (evt) => {
-    if (!pointerReady(evt)) return;
-    const rect = npArtRect || art.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    const dx = Math.max(-1, Math.min(1, ((evt.clientX - rect.left) / rect.width) * 2 - 1));
-    const dy = Math.max(-1, Math.min(1, ((evt.clientY - rect.top) / rect.height) * 2 - 1));
-    npTiltX = -dy * 4.4;
-    npTiltY = dx * 6.2;
-    npGlareX = 50 + dx * 42;
-    npGlareY = 50 + dy * 42;
-    overlay.classList.add('np-tilt-live');
-    npQueuePointerFrame();
-  }, { passive: true });
-
-  art.addEventListener('pointerleave', () => {
-    npTiltX = 0;
-    npTiltY = 0;
-    npGlareX = 50;
-    npGlareY = 50;
-    overlay.classList.remove('np-tilt-live');
-    npQueuePointerFrame();
-  });
-
-  const release = () => {
-    if (!motionAllowed()) npResetPointer();
-  };
-  if (typeof motionQuery.addEventListener === 'function') {
-    motionQuery.addEventListener('change', release);
-  }
-}
-
-/** 队列首次铺开时的错峰入场；只给前 14 行，长队列不会一次动几百行。 */
-function npAnimateQueueIn() {
-  if (!motionAllowed() || !npOpen()) return;
-  const box = $('np-queue');
-  if (!box) return;
-  const rows = Array.from(box.querySelectorAll('.np-q-row')).slice(0, 14);
-  if (!rows.length) return;
-  clearTimeout(npQueueInTimer);
-  rows.forEach((row, i) => {
-    row.style.setProperty('--q-i', String(i));
-    row.classList.add('is-entering-row');
-  });
-  npQueueInTimer = setTimeout(() => {
-    npQueueInTimer = null;
-    rows.forEach((row) => row.classList.remove('is-entering-row'));
-  }, 820);
-}
+/** 队列不再做错峰入场。 */
+function npAnimateQueueIn() {}
 
 /** 关闭前抓一份当前动效状态：入场没播完就按 Esc 时，从眼前这一帧接着退场。 */
 function npMotionSnapshot() {
@@ -2353,132 +2147,27 @@ function npLandCover(flight, token) {
 
 function npEnterMotion(token) {
   const overlay = $('now-playing');
-  const header = overlay.querySelector('.np-header');
-  const deck = overlay.querySelector('.np-console');
-  const queue = overlay.querySelector('.np-queue-rail');
-  const art = $('np-art');
-
   npEntering = true;
   clearTimeout(npEnterTimer);
   npEnterTimer = setTimeout(() => {
     npEntering = false;
     npEnterTimer = null;
-  }, NP_ENTER_MS + 140);
+  }, NP_ENTER_MS + 80);
 
   npTrackMotion(overlay.animate(
     [{ opacity: 0 }, { opacity: 1 }],
-    { duration: 180, easing: 'ease-out', fill: 'both' },
+    { duration: 160, easing: 'ease-out', fill: 'both' },
   ));
-
-  const flight = npCoverFlight($('now-cover'), art, NP_ENTER_MS);
-  if (flight) {
-    art.style.opacity = '0';
-    npLandCover(flight, token);
-    // 页面被切到后台时动画可能停住，兜底把飞行副本收掉，避免一直悬着
-    clearTimeout(npCoverTimer);
-    npCoverTimer = setTimeout(() => {
-      if (token !== npMotionToken) return;
-      npCoverTimer = null;
-      const node = document.querySelector('.np-cover-fly');
-      if (node) node.remove();
-      art.style.opacity = '1';
-    }, NP_ENTER_MS + 380);
-  } else {
-    // 没有封面可飞（纯演示 / 封面缺失）时，大封面自己轻轻浮上来
-    npTrackMotion(art.animate(
-      [
-        { opacity: 0, transform: 'translateY(10px) scale(0.97)' },
-        { opacity: 1, transform: 'none' },
-      ],
-      { duration: 360, delay: 40, easing: NP_MOTION_EASE, fill: 'both' },
-    ));
-  }
-
-  npTrackMotion(header.animate(
-    [
-      { opacity: 0, transform: 'translateY(-10px)' },
-      { opacity: 1, transform: 'none' },
-    ],
-    { duration: 300, delay: 120, easing: NP_MOTION_EASE, fill: 'both' },
-  ));
-
-  npTrackMotion(deck.animate(
-    [
-      { opacity: 0, transform: 'translateY(16px)' },
-      { opacity: 1, transform: 'none' },
-    ],
-    { duration: 330, delay: 150, easing: NP_MOTION_EASE, fill: 'both' },
-  ));
-
-  if (queue && queue.getBoundingClientRect().width > 0
-    && getComputedStyle(queue).visibility !== 'hidden') {
-    npTrackMotion(queue.animate(
-      [
-        { opacity: 0, transform: 'translateX(18px)' },
-        { opacity: 1, transform: 'none' },
-      ],
-      { duration: 310, delay: 180, easing: NP_MOTION_EASE, fill: 'both' },
-    ));
-  }
 }
 
-function npLeaveMotion(token, snapshot = null) {
+function npLeaveMotion(token) {
   const overlay = $('now-playing');
-  const header = overlay.querySelector('.np-header');
-  const deck = overlay.querySelector('.np-console');
-  const queue = overlay.querySelector('.np-queue-rail');
-  const art = $('np-art');
-  const overlayFrom = snapshot && snapshot.overlay ? snapshot.overlay.opacity : '1';
-  const headerFrom = (snapshot && snapshot.header) || { opacity: '1', transform: 'none' };
-  const deckFrom = (snapshot && snapshot.deck) || { opacity: '1', transform: 'none' };
-  const queueFrom = (snapshot && snapshot.queue) || { opacity: '1', transform: 'none' };
-
   overlay.classList.add('is-closing');
-
-  const flight = snapshot && snapshot.fly
-    ? npCoverFlightFromRect(
-      snapshot.fly.rect,
-      snapshot.fly.image,
-      snapshot.fly.radius,
-      snapshot.fly.shadow,
-      $('now-cover'),
-      NP_LEAVE_MS,
-    )
-    : npCoverFlight(art, $('now-cover'), NP_LEAVE_MS, $('np-art-cover'));
-  if (flight) art.style.opacity = '0';
-
+  const from = getComputedStyle(overlay).opacity;
   npTrackMotion(overlay.animate(
-    [{ opacity: overlayFrom }, { opacity: 0 }],
-    { duration: 160, delay: 80, easing: 'ease-in', fill: 'both' },
+    [{ opacity: from }, { opacity: 0 }],
+    { duration: 160, easing: 'ease-in', fill: 'both' },
   ));
-
-  npTrackMotion(header.animate(
-    [
-      { opacity: headerFrom.opacity, transform: headerFrom.transform },
-      { opacity: 0, transform: 'translateY(-8px)' },
-    ],
-    { duration: 90, easing: 'ease-in', fill: 'both' },
-  ));
-
-  npTrackMotion(deck.animate(
-    [
-      { opacity: deckFrom.opacity, transform: deckFrom.transform },
-      { opacity: 0, transform: 'translateY(12px)' },
-    ],
-    { duration: 90, easing: 'ease-in', fill: 'both' },
-  ));
-
-  if (queue && queue.getBoundingClientRect().width > 0
-    && getComputedStyle(queue).visibility !== 'hidden') {
-    npTrackMotion(queue.animate(
-      [
-        { opacity: queueFrom.opacity, transform: queueFrom.transform },
-        { opacity: 0, transform: 'translateX(14px)' },
-      ],
-      { duration: 90, easing: 'ease-in', fill: 'both' },
-    ));
-  }
-
   npCloseTimer = setTimeout(() => npFinishClose(token), NP_LEAVE_MS + 40);
 }
 
@@ -3411,8 +3100,8 @@ function lyricsPlayCoverGhost(snapshot) {
   }
   const anim = ghost.animate(
     [
-      { opacity: 1, transform: 'scale(1)' },
-      { opacity: 0, transform: 'scale(.985)' },
+      { opacity: 1 },
+      { opacity: 0 },
     ],
     { duration: 180, easing: 'ease-out', fill: 'both' },
   );
@@ -4212,46 +3901,26 @@ function setSettingsTab(tab) {
   if (scroll) scroll.scrollTop = 0;
 }
 
-/** 打开：遮罩淡入，窗口从下方带一点 spring 浮起，分类与标题错峰。 */
+/** 打开：遮罩与窗口只做一次短促淡入，不做弹簧、缩放或分类错峰。 */
 function playSettingsOpen(token) {
   const modal = $('settings-modal');
   if (!modal || !motionAllowed()) return;
   const win = modal.querySelector('.settings-window');
   if (!win) return;
   modal.classList.add('is-animating');
-  const header = modal.querySelector('.settings-header');
-  const nav = Array.from(modal.querySelectorAll('.settings-nav-item'));
   const anims = [
     modal.animate(
       [{ opacity: 0 }, { opacity: 1 }],
-      { duration: 200, easing: 'ease-out', fill: 'both' },
+      { duration: 160, easing: 'ease-out', fill: 'both' },
     ),
     win.animate(
       [
-        { opacity: 0, transform: 'translate3d(0, 12px, 0) scale(0.982)' },
+        { opacity: 0, transform: 'translate3d(0, 4px, 0)' },
         { opacity: 1, transform: 'none' },
       ],
-      { duration: 380, easing: MOTION_EASE_SPRING, fill: 'both' },
+      { duration: 160, easing: 'ease-out', fill: 'both' },
     ),
   ];
-  if (header) {
-    anims.push(header.animate(
-      [
-        { opacity: 0, transform: 'translate3d(0, 6px, 0)' },
-        { opacity: 1, transform: 'none' },
-      ],
-      { duration: 320, delay: 80, easing: MOTION_EASE_OUT, fill: 'both' },
-    ));
-  }
-  nav.forEach((el, i) => {
-    anims.push(el.animate(
-      [
-        { opacity: 0, transform: 'translate3d(-8px, 0, 0)' },
-        { opacity: 1, transform: 'none' },
-      ],
-      { duration: 300, delay: 70 + i * 24, easing: MOTION_EASE_OUT, fill: 'both' },
-    ));
-  });
   trackSettingsMotion(anims);
   Promise.all(anims.map((anim) => anim.finished.catch(() => {}))).then(() => {
     if (token !== settingsMotionToken) return;
@@ -4300,23 +3969,20 @@ function closeSettings({ immediate = false } = {}) {
   const anims = [
     modal.animate(
       [{ opacity: 1 }, { opacity: 0 }],
-      { duration: 200, easing: 'ease-in', fill: 'both' },
+      { duration: 120, easing: 'ease-in', fill: 'both' },
     ),
   ];
   if (win) {
     anims.push(win.animate(
-      [
-        { opacity: 1, transform: 'none' },
-        { opacity: 0, transform: 'translate3d(0, 6px, 0) scale(0.988)' },
-      ],
-      { duration: 180, easing: MOTION_EASE_IN, fill: 'both' },
+      [{ opacity: 1 }, { opacity: 0 }],
+      { duration: 120, easing: 'ease-in', fill: 'both' },
     ));
   }
   trackSettingsMotion(anims);
   Promise.all(anims.map((anim) => anim.finished.catch(() => {})))
     .then(() => settingsFinishClose(token));
   // 窗口被切到后台时动画可能停住：兜底按时收尾
-  settingsCloseTimer = setTimeout(() => settingsFinishClose(token), 420);
+  settingsCloseTimer = setTimeout(() => settingsFinishClose(token), 260);
 }
 
 function settingsFinishClose(token) {
@@ -4742,14 +4408,12 @@ $('audio').addEventListener('progress', () => {
 
 $('audio').addEventListener('play', () => {
   syncPlayButton();
-  pulsePlayControls();
   startStats();
   if (npOpen()) npRenderPlayState();
   npSyncEntry();
 });
 $('audio').addEventListener('pause', () => {
   syncPlayButton();
-  pulsePlayControls();
   stopStats();
   if (npOpen()) {
     npRenderPlayState();
@@ -4882,5 +4546,4 @@ window.addEventListener('beforeunload', () => {
 initTheme();
 syncPlayButton();
 setupWindowChrome();
-setupNpPointer();
 boot();

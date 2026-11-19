@@ -9,11 +9,13 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.bilimuse.app.ui.AppTheme
 import com.bilimuse.app.ui.BiliMuseRoot
 import com.bilimuse.app.ui.BiliMuseTheme
 import com.bilimuse.app.ui.MotionProvider
@@ -34,7 +36,19 @@ class MainActivity : ComponentActivity() {
         setContent {
             val viewModel: MainViewModel = viewModel()
             val settings by viewModel.settings.collectAsStateWithLifecycle()
-            BiliMuseTheme {
+            val theme = AppTheme.fromKey(settings.theme)
+            LaunchedEffect(theme) {
+                val style = if (theme.isLight) {
+                    SystemBarStyle.light(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT,
+                    )
+                } else {
+                    SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                }
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+            }
+            BiliMuseTheme(theme) {
                 // 用户设置与系统「移除动画」在这里合成；所有页面动效都读同一个 LocalMotion。
                 MotionProvider(userEnabled = settings.motionEnabled) {
                     BiliMuseRoot(viewModel)

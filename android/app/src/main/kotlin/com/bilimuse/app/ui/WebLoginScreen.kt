@@ -133,7 +133,7 @@ fun WebLoginScreen(
     Box(
         Modifier
             .fillMaxSize()
-            .background(AppBackgroundBrush)
+            .background(BiliBg)
             .statusBarsPadding()
             .navigationBarsPadding()
             .imePadding(),
@@ -182,15 +182,15 @@ fun WebLoginScreen(
             ) {
                 if (!pageReady) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = BiliPink, strokeWidth = 2.5.dp)
+                        CircularProgressIndicator(color = BiliMuted, strokeWidth = 2.dp)
                     }
                 } else {
                     Box(
                         Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(0.dp))
                             .background(Color.White)
-                            .border(1.dp, BiliLine, RoundedCornerShape(16.dp)),
+                            .border(1.dp, BiliLine, RoundedCornerShape(0.dp)),
                     ) {
                         AndroidView(
                             modifier = Modifier.fillMaxSize(),
@@ -213,7 +213,7 @@ fun WebLoginScreen(
                             .fillMaxWidth()
                             .height(2.dp)
                             .align(Alignment.TopCenter),
-                        color = BiliPink,
+                        color = BiliPinkStrong,
                         trackColor = Color.Transparent,
                     )
                 }
@@ -221,12 +221,12 @@ fun WebLoginScreen(
                     Box(
                         Modifier
                             .fillMaxSize()
-                            .background(Color(0xD9090B10)),
+                            .background(Color(0xD9111114)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Surface(
                             color = BiliPanel,
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(0.dp),
                             border = BorderStroke(1.dp, BiliLine),
                         ) {
                             Row(
@@ -235,7 +235,7 @@ fun WebLoginScreen(
                             ) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(20.dp),
-                                    color = BiliPink,
+                                    color = BiliMuted,
                                     strokeWidth = 2.dp,
                                 )
                                 Spacer(Modifier.size(12.dp))
@@ -273,7 +273,7 @@ fun WebLoginScreen(
                                 }
                             },
                         ) {
-                            Text("重试", color = BiliPink)
+                            Text("重试", color = BiliPinkText)
                         }
                     }
                 }

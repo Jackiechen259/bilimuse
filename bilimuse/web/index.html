@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#0b0b0c" id="theme-color" />
+  <meta name="theme-color" content="#111114" id="theme-color" />
   <!-- B 站图片 CDN 会拒绝来自 127.0.0.1 的 Referer（403）；封面 / 头像都是 <img>/background-image，
        统一不发送 Referer。页面没有任何外链，不影响其他请求。 -->
   <meta name="referrer" content="no-referrer" />
@@ -75,15 +75,15 @@
         <div class="theme-row">
           <span class="theme-label">界面风格</span>
           <div class="theme-switch" role="group" aria-label="界面风格">
-            <button type="button" class="theme-opt" data-theme-choice="ink" aria-pressed="true" title="黑白 · 墨">
+            <button type="button" class="theme-opt" data-theme-choice="ink" aria-pressed="true" title="深色 · 墨">
               <span class="theme-dot" aria-hidden="true"></span>
               <span class="theme-name">墨</span>
             </button>
-            <button type="button" class="theme-opt" data-theme-choice="paper" aria-pressed="false" title="黑白 · 纸">
+            <button type="button" class="theme-opt" data-theme-choice="paper" aria-pressed="false" title="浅色 · 纸">
               <span class="theme-dot" aria-hidden="true"></span>
               <span class="theme-name">纸</span>
             </button>
-            <button type="button" class="theme-opt" data-theme-choice="cream" aria-pressed="false" title="米色 · 暖调">
+            <button type="button" class="theme-opt" data-theme-choice="cream" aria-pressed="false" title="暖调 · 米">
               <span class="theme-dot" aria-hidden="true"></span>
               <span class="theme-name">米</span>
             </button>
@@ -257,14 +257,14 @@
       </div>
       <div class="np-header-right">
         <div class="theme-switch theme-switch-compact" role="group" aria-label="界面风格">
-          <button type="button" class="theme-opt" data-theme-choice="ink" aria-pressed="true" title="黑白 · 墨">
-            <span class="theme-dot" aria-hidden="true"></span><span class="visually-hidden">黑白深色</span>
+          <button type="button" class="theme-opt" data-theme-choice="ink" aria-pressed="true" title="深色 · 墨">
+            <span class="theme-dot" aria-hidden="true"></span><span class="visually-hidden">深色</span>
           </button>
-          <button type="button" class="theme-opt" data-theme-choice="paper" aria-pressed="false" title="黑白 · 纸">
-            <span class="theme-dot" aria-hidden="true"></span><span class="visually-hidden">黑白浅色</span>
+          <button type="button" class="theme-opt" data-theme-choice="paper" aria-pressed="false" title="浅色 · 纸">
+            <span class="theme-dot" aria-hidden="true"></span><span class="visually-hidden">浅色</span>
           </button>
-          <button type="button" class="theme-opt" data-theme-choice="cream" aria-pressed="false" title="米色 · 暖调">
-            <span class="theme-dot" aria-hidden="true"></span><span class="visually-hidden">米色</span>
+          <button type="button" class="theme-opt" data-theme-choice="cream" aria-pressed="false" title="暖调 · 米">
+            <span class="theme-dot" aria-hidden="true"></span><span class="visually-hidden">暖调</span>
           </button>
         </div>
         <button class="np-tool hidden" id="np-copy" type="button" title="复制 B 站链接" aria-label="复制 B 站链接">
@@ -687,8 +687,8 @@
                     <i class="tp-bar"></i><i class="tp-line"></i><i class="tp-line short"></i><i class="tp-dot"></i>
                   </span>
                   <span class="theme-card-copy">
-                    <strong>墨 · 黑白</strong>
-                    <small>深色底、纸白字，像黑胶封套的背面</small>
+                    <strong>墨 · 深色</strong>
+                    <small>近黑表面、1px 细线，粉色只标记播放位置</small>
                   </span>
                   <span class="theme-check" aria-hidden="true">
                     <svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 6.5" /></svg>
@@ -699,8 +699,8 @@
                     <i class="tp-bar"></i><i class="tp-line"></i><i class="tp-line short"></i><i class="tp-dot"></i>
                   </span>
                   <span class="theme-card-copy">
-                    <strong>纸 · 黑白</strong>
-                    <small>米白纸面、墨色字，安静而清晰</small>
+                    <strong>纸 · 浅色</strong>
+                    <small>纯白表面、墨色字，安静而清晰</small>
                   </span>
                   <span class="theme-check" aria-hidden="true">
                     <svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 6.5" /></svg>
@@ -712,7 +712,7 @@
                   </span>
                   <span class="theme-card-copy">
                     <strong>米 · 暖调</strong>
-                    <small>亚麻与咖啡色，适合夜晚的小音量</small>
+                    <small>暖纸底色、低对比表面，适合夜晚的小音量</small>
                   </span>
                   <span class="theme-check" aria-hidden="true">
                     <svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 6.5" /></svg>
@@ -725,7 +725,7 @@
               <span class="settings-tip-icon">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2 5.6 5.6" /><circle cx="12" cy="12" r="4" /></svg>
               </span>
-              <p>三套主题都保持同样的信息层级；封面是页面里唯一的彩色来源。选择会立刻生效，只保存在本机。</p>
+              <p>三套主题共用同一套扁平层级；粉色只出现在播放、进度与选中项。选择会立刻生效，只保存在本机。</p>
             </div>
           </section>
 
