@@ -162,8 +162,16 @@ fun NowPlayingScreen(
             AnimatedContent(
                 targetState = lyrics.open,
                 transitionSpec = {
-                    fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
-                        fadeOut(motion.tween(MotionTokens.Fast)),
+                    (fadeIn(motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart)) +
+                        scaleIn(
+                            initialScale = 0.995f,
+                            animationSpec = motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart),
+                        )).togetherWith(
+                        fadeOut(motion.tween(MotionTokens.Fast, easing = MotionEase.In)) +
+                            scaleOut(
+                                targetScale = 0.998f,
+                                animationSpec = motion.tween(MotionTokens.Fast, easing = MotionEase.In),
+                            ),
                     )
                 },
                 contentAlignment = Alignment.TopCenter,
@@ -435,8 +443,12 @@ private fun CoverHero(
         AnimatedContent(
             targetState = cover,
             transitionSpec = {
-                fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
-                    fadeOut(motion.tween(MotionTokens.Fast)),
+                (fadeIn(motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart)) +
+                    scaleIn(
+                        initialScale = 1.015f,
+                        animationSpec = motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart),
+                    )).togetherWith(
+                    fadeOut(motion.tween(MotionTokens.Fast, easing = MotionEase.In)),
                 )
             },
             contentAlignment = Alignment.Center,
@@ -473,8 +485,12 @@ private fun TrackTitles(state: PlayerUiState, modifier: Modifier = Modifier) {
         AnimatedContent(
             targetState = title,
             transitionSpec = {
-                fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
-                    fadeOut(motion.tween(MotionTokens.Fast)),
+                (fadeIn(motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart)) +
+                    slideInVertically(
+                        initialOffsetY = { it / 4 },
+                        animationSpec = motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart),
+                    )).togetherWith(
+                    fadeOut(motion.tween(MotionTokens.Fast, easing = MotionEase.In)),
                 )
             },
             contentAlignment = Alignment.Center,
@@ -493,8 +509,12 @@ private fun TrackTitles(state: PlayerUiState, modifier: Modifier = Modifier) {
         AnimatedContent(
             targetState = artist,
             transitionSpec = {
-                fadeIn(motion.tween(MotionTokens.Fast)).togetherWith(
-                    fadeOut(motion.tween(MotionTokens.Fast)),
+                (fadeIn(motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart)) +
+                    slideInVertically(
+                        initialOffsetY = { it / 4 },
+                        animationSpec = motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart),
+                    )).togetherWith(
+                    fadeOut(motion.tween(MotionTokens.Fast, easing = MotionEase.In)),
                 )
             },
             contentAlignment = Alignment.Center,

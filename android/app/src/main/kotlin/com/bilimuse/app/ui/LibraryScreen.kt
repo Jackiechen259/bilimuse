@@ -344,6 +344,11 @@ private fun FolderChips(
                 animationSpec = motion.tween(MotionTokens.Fast),
                 label = "chip-label",
             )
+            val lineAlpha by animateFloatAsState(
+                targetValue = if (selected) 1f else 0f,
+                animationSpec = motion.tween(MotionTokens.Fast),
+                label = "chip-line",
+            )
             Surface(
                 onClick = { onFolderClick(folder) },
                 shape = RoundedCornerShape(2.dp),
@@ -383,7 +388,7 @@ private fun FolderChips(
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                             .height(2.dp)
-                            .background(if (selected) BiliPinkStrong else Color.Transparent),
+                            .background(BiliPinkStrong.copy(alpha = lineAlpha)),
                     )
                 }
             }

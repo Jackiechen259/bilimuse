@@ -165,8 +165,16 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
                 bottomBar = {
                     AnimatedVisibility(
                         visible = player.bvid.isNotEmpty(),
-                        enter = fadeIn(motion.tween(MotionTokens.Fast)),
-                        exit = fadeOut(motion.tween(MotionTokens.Fast)),
+                        enter = fadeIn(motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart)) +
+                            slideInVertically(
+                                initialOffsetY = { it / 4 },
+                                animationSpec = motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart),
+                            ),
+                        exit = fadeOut(motion.tween(MotionTokens.Fast, easing = MotionEase.In)) +
+                            slideOutVertically(
+                                targetOffsetY = { it / 4 },
+                                animationSpec = motion.tween(MotionTokens.Fast, easing = MotionEase.In),
+                            ),
                     ) {
                         MiniPlayer(
                             state = player,
@@ -214,9 +222,23 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
         AnimatedVisibility(
             visible = showPlayer && player.bvid.isNotEmpty(),
             modifier = Modifier.zIndex(2f),
-            // 整页只做一次淡入，避免布局位移与缩放。
-            enter = fadeIn(motion.tween(MotionTokens.Base)),
-            exit = fadeOut(motion.tween(MotionTokens.Fast)),
+            // 整页轻量上浮：只做透明度、10dp 位移与 0.995 缩放。
+            enter = fadeIn(motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart)) +
+                slideInVertically(
+                    initialOffsetY = { it / 40 },
+                    animationSpec = motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart),
+                ) + scaleIn(
+                    initialScale = 0.995f,
+                    animationSpec = motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart),
+                ),
+            exit = fadeOut(motion.tween(MotionTokens.Fast, easing = MotionEase.In)) +
+                slideOutVertically(
+                    targetOffsetY = { it / 40 },
+                    animationSpec = motion.tween(MotionTokens.Fast, easing = MotionEase.In),
+                ) + scaleOut(
+                    targetScale = 0.995f,
+                    animationSpec = motion.tween(MotionTokens.Fast, easing = MotionEase.In),
+                ),
         ) {
             NowPlayingScreen(
                 state = player,
@@ -257,12 +279,12 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
             modifier = Modifier.zIndex(1f),
             enter = slideInHorizontally(
                 initialOffsetX = { it / 6 },
-                animationSpec = motion.spring(dampingRatio = 0.88f, stiffness = 300f),
+                animationSpec = motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart),
             ) + fadeIn(motion.tween(MotionTokens.Base)),
             exit = slideOutHorizontally(
                 targetOffsetX = { it / 5 },
-                animationSpec = motion.tween(260, easing = MotionEase.In),
-            ) + fadeOut(motion.tween(200)),
+                animationSpec = motion.tween(MotionTokens.Fast, easing = MotionEase.In),
+            ) + fadeOut(motion.tween(MotionTokens.Fast)),
         ) {
             FavoritesScreen(
                 state = library,

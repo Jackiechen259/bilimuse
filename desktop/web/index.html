@@ -149,7 +149,15 @@
         text-align: center;
       }
 
-      .mark-wrap { display: grid; place-items: center; }
+      .chrome {
+        animation: splash-chrome 0.3s var(--ease-out) both;
+      }
+
+      .mark-wrap {
+        display: grid;
+        place-items: center;
+        animation: splash-mark 0.46s var(--ease-out) both;
+      }
 
       .mark {
         width: 96px;
@@ -161,6 +169,7 @@
         font-size: 26px;
         font-weight: 700;
         letter-spacing: -0.02em;
+        animation: splash-up 0.42s var(--ease-out) 0.08s both;
       }
 
       .tagline {
@@ -168,6 +177,7 @@
         color: var(--muted);
         font-size: 12.5px;
         letter-spacing: 0.08em;
+        animation: splash-up 0.42s var(--ease-out) 0.14s both;
       }
 
       .status {
@@ -183,6 +193,7 @@
         font-size: 12.5px;
         max-width: 560px;
         transition: color 0.16s ease, border-color 0.16s ease;
+        animation: splash-up 0.42s var(--ease-out) 0.2s both;
       }
 
       .status.error {
@@ -227,7 +238,24 @@
         100% { transform: translateX(390%); }
       }
 
+      @keyframes splash-chrome {
+        from { opacity: 0; transform: translate3d(0, -4px, 0); }
+      }
+
+      @keyframes splash-mark {
+        from { opacity: 0; transform: scale(0.94); }
+      }
+
+      @keyframes splash-up {
+        from { opacity: 0; transform: translate3d(0, 6px, 0); }
+      }
+
       @media (prefers-reduced-motion: reduce) {
+        .chrome,
+        .mark-wrap,
+        h1,
+        .tagline,
+        .status { animation: none; }
         .bar { animation: none; width: 100%; opacity: 0.35; }
       }
     </style>

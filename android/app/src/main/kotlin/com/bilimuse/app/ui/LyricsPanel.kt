@@ -1,6 +1,7 @@
 package com.bilimuse.app.ui
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
@@ -794,6 +795,16 @@ private fun LyricsLineRow(
         animationSpec = motion.tween(MotionTokens.Fast),
         label = "lyrics-line-color",
     )
+    val fontSize by animateFloatAsState(
+        targetValue = if (active) 20f else 15f,
+        animationSpec = motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart),
+        label = "lyrics-line-size",
+    )
+    val lineHeight by animateFloatAsState(
+        targetValue = if (active) 28f else 22f,
+        animationSpec = motion.tween(MotionTokens.Base, easing = MotionEase.OutQuart),
+        label = "lyrics-line-height",
+    )
     val interactionSource = remember { MutableInteractionSource() }
     val clickableModifier = if (seekTo != null) {
         Modifier
@@ -818,8 +829,8 @@ private fun LyricsLineRow(
         Text(
             text = line.text.ifBlank { " " },
             color = color,
-            fontSize = if (active) 20.sp else 15.sp,
-            lineHeight = if (active) 28.sp else 22.sp,
+            fontSize = fontSize.sp,
+            lineHeight = lineHeight.sp,
             fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
             textDecoration = if (active) TextDecoration.Underline else null,
             textAlign = TextAlign.Center,

@@ -87,8 +87,8 @@ object MotionTokens {
     const val Slow = 240
     const val Cinematic = 620
     const val DialogExit = 120
-    const val StaggerStep = 28
-    const val StaggerCap = 16
+    const val StaggerStep = 16
+    const val StaggerCap = 8
 }
 
 object MotionEase {
@@ -198,10 +198,39 @@ private fun systemAnimationsEnabled(context: Context): Boolean {
 @Composable
 fun Modifier.staggerIn(
     index: Int,
-    distance: Dp = 12.dp,
+    distance: Dp = 8.dp,
     scaleFrom: Float = 1f,
     key: Any? = Unit,
-): Modifier = this
+): Modifier {
+    val motion = LocalMotion.current
+    if (!motion.enabled) return this
+    // 只给首屏前几行做入场；滚动复用的深列表项不再反复淡入。
+    if (index > MotionTokens.StaggerCap) return this
+
+    var entered by remember(key) { mutableStateOf(false) }
+    LaunchedEffect(key) { entered = true }
+    val progress by animateFloatAsState(
+        targetValue = if (entered) 1f else 0f,
+        animationSpec = motion.tween(
+            durationMs = MotionTokens.Base,
+            delayMs = motion.staggerDelay(index),
+            easing = MotionEase.OutQuart,
+        ),
+        label = "stagger-in",
+    )
+    val lift = minOf(distance, 10.dp)
+    val fromScale = scaleFrom.coerceAtLeast(0.97f)
+
+    return graphicsLayer {
+        alpha = progress
+        translationY = (1f - progress) * lift.toPx()
+        if (fromScale < 1f) {
+            val scale = fromScale + (1f - fromScale) * progress
+            scaleX = scale
+            scaleY = scale
+        }
+    }
+}
 
 /** 按下时轻微收紧：短 spring，松手立刻回弹。 */
 @Composable

@@ -3188,6 +3188,128 @@ html.is-windows .np-header { padding-right: 6px; }
   line-height: 1;
 }
 
+/* ============================================================== 过渡动效
+   克制的页面进入 / 列表入场 / 内容切换：只动 opacity 与 translate，
+   最长 380ms；系统减少动态效果时由文件末尾的统一规则关闭。 */
+
+@keyframes ui-rise {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+}
+@keyframes ui-soft-rise {
+  from { opacity: 0; transform: translate3d(0, 4px, 0); }
+}
+@keyframes ui-slide-left {
+  from { opacity: 0; transform: translate3d(-8px, 0, 0); }
+}
+@keyframes ui-slide-right {
+  from { opacity: 0; transform: translate3d(10px, 0, 0); }
+}
+@keyframes track-enter {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+}
+@keyframes folder-enter {
+  from { opacity: 0; transform: translate3d(-5px, 0, 0); }
+}
+@keyframes track-bar {
+  from { opacity: 0; transform: scaleY(0.2); }
+}
+@keyframes folder-bar {
+  from { opacity: 0; transform: scaleY(0.3); }
+}
+@keyframes playhead-grow {
+  from { opacity: 0; transform: scaleY(0.15); }
+}
+@keyframes title-swap {
+  from { opacity: 0; transform: translate3d(0, 4px, 0); }
+}
+@keyframes np-cover-swap {
+  from { opacity: 0.45; transform: scale(1.012); }
+}
+@keyframes np-line-in {
+  from { opacity: 0; transform: translate3d(0, 5px, 0); }
+}
+
+/* 应用外壳：启动时轻量落位 */
+.sidebar { animation: ui-slide-left 0.34s var(--ease-out) both; }
+.topbar { animation: ui-soft-rise 0.34s var(--ease-out) 0.02s both; }
+.player { animation: ui-rise 0.38s var(--ease-out) 0.06s both; }
+
+/* 收藏夹 / 曲目列表：错峰入场 + 当前项播放头生长 */
+.folder.is-entering {
+  animation: folder-enter 0.26s var(--ease-out) backwards;
+  animation-delay: calc(var(--folder-i, 0) * 14ms);
+}
+.folder.active::before {
+  transform-origin: center;
+  animation: folder-bar 0.26s var(--ease-out);
+}
+.track.is-entering {
+  animation: track-enter 0.28s var(--ease-out) backwards;
+  animation-delay: calc(var(--enter-i, 0) * 14ms);
+}
+.track.active::before {
+  transform-origin: top;
+  animation: playhead-grow 0.24s var(--ease-out);
+}
+.track.just-activated::before {
+  transform-origin: top;
+  animation: track-bar 0.36s var(--ease-out);
+}
+.track .cover {
+  transition: transform 0.2s var(--ease-out), border-color 0.16s var(--dur);
+}
+.track:hover .cover { transform: scale(1.03); }
+
+/* 标题 / 封面换字：一次低调的浮入 */
+.titles h2.is-swapping,
+.now-text #now-title.is-swapping,
+.now-text #now-sub.is-swapping {
+  animation: title-swap 0.26s var(--ease-out);
+}
+.now-cover { transition: transform 0.2s var(--ease-out); }
+.now:hover .now-cover { transform: scale(1.03); }
+.now-cover.is-turning { animation: title-swap 0.24s var(--ease-out); }
+
+/* 播放详情：打开时封面、信息、走带依次轻量上浮 */
+.np-art { animation: ui-soft-rise 0.32s var(--ease-out) 0.02s both; }
+.np-trackline { animation: ui-soft-rise 0.32s var(--ease-out) 0.1s both; }
+.np-console .np-progress { animation: ui-soft-rise 0.3s var(--ease-out) 0.14s both; }
+.np-console .np-transport { animation: ui-soft-rise 0.3s var(--ease-out) 0.18s both; }
+.np-console .np-foot { animation: ui-soft-rise 0.3s var(--ease-out) 0.22s both; }
+.np-art-cover.is-swapping { animation: np-cover-swap 0.26s var(--ease-out); }
+.np-trackline.is-swapping > * {
+  animation: np-line-in 0.24s var(--ease-out) backwards;
+  animation-delay: calc(var(--line-i, 0) * 20ms);
+}
+
+/* 歌词：打开时淡入上浮，当前行下划线跟随 */
+.np-lyrics { animation: ui-soft-rise 0.22s var(--ease-out) both; }
+.np-lyrics-search { animation: ui-soft-rise 0.16s var(--ease-out); }
+.np-lyrics-sources { animation: ui-soft-rise 0.16s var(--ease-out); }
+.np-lyrics-jump { animation: ui-soft-rise 0.16s var(--ease-out); }
+.np-lyrics-line {
+  transition: color 0.14s ease, font-size 0.16s var(--ease-out), text-underline-offset 0.16s ease;
+}
+
+/* 队列：覆盖式抽屉在宽屏从右侧轻推入；当前行播放头生长 */
+.np-q-row.is-entering-row {
+  animation: ui-slide-right 0.26s var(--ease-out) backwards;
+  animation-delay: calc(var(--q-i, 0) * 12ms);
+}
+.np-q-row.is-just-current { animation: ui-soft-rise 0.24s var(--ease-out); }
+.np-q-row.is-current::before {
+  transform-origin: center;
+  animation: playhead-grow 0.24s var(--ease-out);
+}
+@media (min-width: 1121px) {
+  .np-queue-rail { animation: ui-slide-right 0.3s var(--ease-out) 0.04s both; }
+}
+
+/* 设置 / 登录弹层：窗口轻量上浮 */
+.modal-card { animation: ui-rise 0.24s var(--ease-out); }
+.theme-card { transition: border-color var(--dur), background var(--dur), transform 0.2s var(--ease-out); }
+.theme-card:hover { transform: translateY(-1px); }
+
 /* ===================================================================== 响应式 */
 
 @media (max-width: 1200px) {

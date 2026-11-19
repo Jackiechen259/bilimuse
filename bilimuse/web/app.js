@@ -1511,8 +1511,24 @@ function npApplyCover(cover) {
   });
 }
 
-/** 扁平语言下切歌不再做柔焦/换气动画，封面直接交叉溶解。 */
-function npAnimateTrackSwap() {}
+/** 切歌：封面轻微交叉、文案按行浮入；只做 opacity / 小位移。 */
+function npAnimateTrackSwap({ cover = false, text = true } = {}) {
+  if (!npOpen() || !motionAllowed()) return;
+  const overlay = $('now-playing');
+  if (text) {
+    const line = overlay.querySelector('.np-trackline');
+    if (line) {
+      Array.from(line.children).forEach((el, i) => {
+        el.style.setProperty('--line-i', String(i));
+      });
+      restartClass(line, 'is-swapping', 520);
+    }
+  }
+  if (cover) {
+    const art = $('np-art-cover');
+    if (art && !art.classList.contains('is-empty')) restartClass(art, 'is-swapping', 420);
+  }
+}
 
 function npRenderInfo() {
   if (!npOpen()) return;
@@ -2046,8 +2062,23 @@ function npTrackMotion(anim) {
 /* 扁平语言下不再做指针视差 / 封面倾斜；保留空实现供关闭流程调用。 */
 function npResetPointer() {}
 
-/** 队列不再做错峰入场。 */
-function npAnimateQueueIn() {}
+/** 队列首次铺开：前 12 行按 12ms 步长轻量入场。 */
+function npAnimateQueueIn() {
+  if (!motionAllowed() || !npOpen()) return;
+  const box = $('np-queue');
+  if (!box) return;
+  const rows = Array.from(box.querySelectorAll('.np-q-row')).slice(0, 12);
+  if (!rows.length) return;
+  clearTimeout(npQueueInTimer);
+  rows.forEach((row, i) => {
+    row.style.setProperty('--q-i', String(i));
+    row.classList.add('is-entering-row');
+  });
+  npQueueInTimer = setTimeout(() => {
+    npQueueInTimer = null;
+    rows.forEach((row) => row.classList.remove('is-entering-row'));
+  }, 520);
+}
 
 /** 关闭前抓一份当前动效状态：入场没播完就按 Esc 时，从眼前这一帧接着退场。 */
 function npMotionSnapshot() {
