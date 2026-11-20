@@ -59,6 +59,36 @@ def record(**over) -> dict:
     return data
 
 
+def planned_queries(title: str, upper: str = "") -> list[dict]:
+    """按当前规则，一次解析会对 LRCLIB 发起的查询计划。"""
+    return lyrics.query_plan(
+        lyrics.title_candidates(title, upper), lyrics.clean_title(title)
+    )
+
+
+def calibration_record(*, shift: float = 0.0, count: int = 16, record_id: int = 42) -> dict:
+    """一首时间规整、文本互不相同的 LRCLIB 同步歌词。"""
+    lines = []
+    for index in range(count):
+        second = int(40 + index * 5 + shift)
+        lines.append(f"[{second // 60:02d}:{second % 60:02d}.00]第{index}句歌词内容各不相同")
+    return record(id=record_id, syncedLyrics="\n".join(lines))
+
+
+def calibration_body(shift: float = 0.0, count: int = 16) -> dict:
+    """与 calibration_record 对应、整体偏移 shift 秒的 AI 字幕。"""
+    return {
+        "body": [
+            seg(
+                40 + index * 5 + shift,
+                41 + index * 5 + shift,
+                f"♪第{index}句歌词内容各不相同♪",
+            )
+            for index in range(count)
+        ]
+    }
+
+
 def manual_body() -> dict:
     return {"body": [seg(0, 1, "第一句"), seg(2, 3, "第二句")]}
 
@@ -351,11 +381,33 @@ def test_clean_title_strips_noise_tags():
     assert lyrics.clean_title("【4K】夜航星 - 不才") == "夜航星 - 不才"
     assert lyrics.clean_title("孤勇者（Live版）") == "孤勇者"
     assert lyrics.clean_title("《起风了》买辣椒也用券") == "起风了 买辣椒也用券"
+    # 「」是歌名引号，不是噪声标签：内容要保留
+    assert lyrics.clean_title("「残酷な天使のテーゼ」高橋洋子") == "残酷な天使のテーゼ 高橋洋子"
+    # feat. 子句不属于曲名
+    assert lyrics.clean_title("孤勇者 feat. 陈奕迅") == "孤勇者"
 
 
 def test_candidates_split_by_dash():
-    assert lyrics.title_candidates("【4K】夜航星 - 不才", "UP主") == [("夜航星", "不才")]
-    assert lyrics.title_candidates("夜航星 — 不才", "UP主") == [("夜航星", "不才")]
+    assert lyrics.title_candidates("【4K】夜航星 - 不才", "UP主") == [
+        ("夜航星", "不才"),
+        ("不才", "夜航星"),
+    ]
+    assert lyrics.title_candidates("夜航星 — 不才", "UP主") == [
+        ("夜航星", "不才"),
+        ("不才", "夜航星"),
+    ]
+
+
+def test_candidates_reverse_order_for_artist_first_titles():
+    # 「歌手 - 歌名」也是常见写法：反向候选必须进入列表
+    assert lyrics.title_candidates("不才 - 夜航星", "UP主") == [
+        ("不才", "夜航星"),
+        ("夜航星", "不才"),
+    ]
+    # 去重并限制最多 3 个
+    candidates = lyrics.title_candidates("《夜航星》不才 - 夜航星", "UP主")
+    assert len(candidates) <= lyrics.MAX_CANDIDATES
+    assert len(candidates) == len({(t.casefold(), a.casefold()) for t, a in candidates})
 
 
 def test_candidates_use_book_title_and_outside_artist():
@@ -373,8 +425,28 @@ def test_candidates_fall_back_to_whole_title():
 def test_candidates_keep_cover_song_name():
     # 「翻唱」去掉的是标签，歌名/歌手照常保留
     assert lyrics.title_candidates("起风了 翻唱 - 买辣椒也用券", "UP主") == [
-        ("起风了", "买辣椒也用券")
+        ("起风了", "买辣椒也用券"),
+        ("买辣椒也用券", "起风了"),
     ]
+
+
+def test_artist_score_matches_feat_components():
+    # 记录歌手可能是「A feat. B」，候选只解析出 A
+    assert lyrics.artist_score("陈奕迅", "陈奕迅 feat. G.E.M.邓紫棋") == 0.9
+    assert lyrics.artist_score("陈奕迅", "G.E.M.邓紫棋 & 陈奕迅") == 0.9
+    assert lyrics.artist_score("陈奕迅", "周杰伦") == 0.0
+
+
+def test_feat_regex_does_not_match_inside_english_words():
+    assert lyrics.clean_title("Soft Rain") == "soft rain"
+    assert lyrics.clean_title("Gift of the Magi") == "gift of the magi"
+    assert lyrics.clean_title("Daft Punk - Get Lucky") == "daft punk - get lucky"
+
+
+def test_artist_split_does_not_split_ft_inside_english_words():
+    # "Daft Punk" 不能被拆成 "Da" / "Punk"（否则会产生 0.9 的假歌手匹配）
+    assert lyrics.artist_score("Da", "Daft Punk") < 0.9
+    assert lyrics.artist_score("So", "Soft Cell") < 0.9
 
 
 # ---------------------------------------------------------------- 打分
@@ -465,6 +537,409 @@ def test_pick_match_score_matches_score_record():
     assert matched[1] == pytest.approx(
         lyrics.score_record(rec, "夜航星", "不才", "", 304)
     )
+
+
+def test_rank_matches_skips_records_without_lyrics():
+    ranked = lyrics.rank_matches(
+        [
+            record(id=1, syncedLyrics=None, plainLyrics=None),
+            record(id=2),
+        ],
+        [("夜航星", "不才")],
+        "",
+        304,
+    )
+    assert [item[0]["id"] for item in ranked] == [2]
+
+
+def test_rank_matches_rejects_artist_conflict():
+    # 曲名完全一致、时长也一致，但歌手完全不符：不能因为总分 0.8 就接受
+    ranked = lyrics.rank_matches(
+        [record(id=1, artistName="周杰伦")],
+        [("夜航星", "不才")],
+        "",
+        304,
+    )
+    assert ranked == []
+
+
+def test_rank_matches_uploader_fallback_is_not_gated():
+    ranked = lyrics.rank_matches(
+        [record(id=1, artistName="某某UP主")],
+        [("夜航星", "")],
+        "某某UP主",
+        304,
+    )
+    assert [item[0]["id"] for item in ranked] == [1]
+
+
+def test_rank_matches_rejects_duration_far_apart():
+    assert lyrics.rank_matches(
+        [record(id=1, duration=304 + 46)], [("夜航星", "不才")], "", 304
+    ) == []
+    # 边界内仍可接受（软打分继续负责排序）
+    assert [item[0]["id"] for item in lyrics.rank_matches(
+        [record(id=2, duration=304 + 45)], [("夜航星", "不才")], "", 304
+    )] == [2]
+
+
+def test_rank_matches_rejects_instrumental_titles():
+    ranked = lyrics.rank_matches(
+        [record(id=1, trackName="夜航星 (伴奏)")], [("夜航星", "不才")], "", 304
+    )
+    assert ranked == []
+
+
+def test_rank_matches_prefers_synced_on_equal_score():
+    plain = record(id=1, syncedLyrics=None, plainLyrics="夜航星")
+    synced = record(id=2)
+    ranked = lyrics.rank_matches([plain, synced], [("夜航星", "不才")], "", 304)
+    assert [item[0]["id"] for item in ranked] == [2, 1]
+
+
+def test_query_plan_orders_and_dedupes():
+    plan = lyrics.query_plan(
+        [("夜航星", "不才"), ("不才", "夜航星")], "夜航星 - 不才"
+    )
+    assert plan == [
+        {"track_name": "夜航星", "artist_name": "不才"},
+        {"track_name": "不才", "artist_name": "夜航星"},
+        {"q": "夜航星 - 不才"},
+        {"track_name": "夜航星"},
+    ]
+
+
+def test_query_plan_skips_empty_artist_and_duplicates():
+    plan = lyrics.query_plan([("夜航星", "")], "夜航星")
+    # 没有歌手参数；q= 与 track_name= 是不同查询，都要保留
+    assert plan == [{"track_name": "夜航星"}, {"q": "夜航星"}]
+
+
+def test_query_plan_is_capped():
+    plan = lyrics.query_plan(
+        [("一", "甲"), ("二", "乙"), ("三", "丙")], "一 - 甲"
+    )
+    assert len(plan) <= lyrics.MAX_QUERIES
+
+
+# ---------------------------------------------------------------- LRCLIB 查询与缓存
+
+
+async def test_search_lrclib_runs_queries_in_parallel(service, monkeypatch):
+    seen: list[dict] = []
+
+    async def fake_search(params):
+        seen.append(dict(params))
+        await asyncio.sleep(0.2)
+        return [record()]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    plan = lyrics.query_plan(
+        [("夜航星", "不才"), ("不才", "夜航星")], "夜航星 - 不才"
+    )
+    started = time.perf_counter()
+    ranked = await service._search_lrclib(
+        [("夜航星", "不才"), ("不才", "夜航星")], "夜航星 - 不才", "", 304
+    )
+    elapsed = time.perf_counter() - started
+    assert ranked and ranked[0][0]["id"] == record()["id"]
+    assert len(seen) == len(plan)
+    assert elapsed < 0.6  # 串行需要 4 × 0.2s
+
+
+async def test_search_lrclib_ranks_globally_across_queries(service, monkeypatch):
+    weak = record(id=1, trackName="夜航星组曲", artistName="", duration=304)
+    strong = record(id=2)
+
+    async def fake_search(params):
+        return [strong] if "q" in params else [weak]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    ranked = await service._search_lrclib(
+        [("夜航星", "不才")], "夜航星 - 不才", "", 304
+    )
+    assert [item[0]["id"] for item in ranked][:2] == [2, 1]
+
+
+async def test_ladder_skips_lrclib_record_without_lyrics(service, monkeypatch):
+    empty = record(id=1, syncedLyrics=None, plainLyrics=None)
+    good = record(id=2)
+
+    async def fake_search(params):
+        return [empty] if "artist_name" in params else [good]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    result = await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    assert result["status"] == "ok"
+    assert result["source"] == "lrclib"
+    assert result["meta"]["matched"]["id"] == 2
+
+
+async def test_lrclib_search_results_are_cached_across_bvids(service, monkeypatch):
+    calls = {"n": 0}
+
+    async def fake_search(params):
+        calls["n"] += 1
+        return [record()]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    plan = lyrics.query_plan(
+        [("夜航星", "不才"), ("不才", "夜航星")], "夜航星 - 不才"
+    )
+    await service.resolve("BV1xx411c7mA", title="夜航星 - 不才", duration=304)
+    assert calls["n"] == len(plan)
+    await service.resolve("BV1xx411c7mB", title="夜航星 - 不才", duration=304)
+    assert calls["n"] == len(plan)
+
+
+async def test_lrclib_search_cache_expires(service, monkeypatch):
+    now = {"t": 1000.0}
+    monkeypatch.setattr(service, "_now", lambda: now["t"])
+    calls = {"n": 0}
+
+    async def fake_search(params):
+        calls["n"] += 1
+        return [record()]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    await service.resolve("BV1xx411c7mA", title="夜航星 - 不才", duration=304)
+    first = calls["n"]
+    now["t"] += lyrics.SEARCH_TTL + 1
+    await service.resolve("BV1xx411c7mB", title="夜航星 - 不才", duration=304)
+    assert calls["n"] > first
+
+
+async def test_concurrent_searches_share_inflight_requests(service, monkeypatch):
+    calls = {"n": 0}
+
+    async def fake_search(params):
+        calls["n"] += 1
+        await asyncio.sleep(0.05)
+        return [record()]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    plan = lyrics.query_plan(
+        [("夜航星", "不才"), ("不才", "夜航星")], "夜航星 - 不才"
+    )
+    await asyncio.gather(
+        service.resolve("BV1xx411c7mA", title="夜航星 - 不才", duration=304),
+        service.resolve("BV1xx411c7mB", title="夜航星 - 不才", duration=304),
+    )
+    assert calls["n"] == len(plan)
+
+
+async def test_search_budget_cancels_slow_queries(service, monkeypatch):
+    monkeypatch.setattr(lyrics, "LRCLIB_BUDGET", 0.1)
+
+    async def fake_search(params):
+        if "artist_name" in params:
+            await asyncio.sleep(0.01)
+            return [record()]
+        await asyncio.sleep(5)
+        return []
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    started = time.perf_counter()
+    ranked = await service._search_lrclib(
+        [("夜航星", "不才")], "夜航星 - 不才", "", 304
+    )
+    elapsed = time.perf_counter() - started
+    assert ranked
+    assert elapsed < 1.0
+
+
+async def test_all_lrclib_timeouts_reason(service, monkeypatch):
+    async def fake_search(params):
+        raise httpx.ReadTimeout("超时")
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    result = await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    assert result["status"] == "none"
+    assert result["reason"] == "timeout"
+
+
+async def test_search_budget_without_results_reports_timeout(service, monkeypatch):
+    monkeypatch.setattr(lyrics, "LRCLIB_BUDGET", 0.05)
+
+    async def slow_search(params):
+        await asyncio.sleep(5)
+        return []
+
+    monkeypatch.setattr(service, "_fetch_search", slow_search)
+    result = await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    assert result["status"] == "none"
+    assert result["reason"] == "timeout"
+
+
+async def test_lrclib_uses_bili_page_duration_when_missing(service, monkeypatch):
+    # 请求没带 duration 时用 B 站 page_info.duration；900s 的记录必须被硬过滤
+    service.bili = FakeBili(logged_in=True, tracks=[], duration=304)
+
+    async def fake_search(params):
+        return [record(id=1, duration=900)]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    result = await service.resolve(BV, title="夜航星 - 不才")
+    assert result["status"] == "none"
+    assert result["reason"] == "not_found"
+
+    async def good_search(params):
+        return [record(id=2, duration=304)]
+
+    monkeypatch.setattr(service, "_fetch_search", good_search)
+    service._search_cache.clear()  # 换掉假数据后绕过上一次的查询缓存
+    result = await service.resolve("BV1xx411c7mE", title="夜航星 - 不才")
+    assert result["status"] == "ok"
+    assert result["meta"]["matched"]["id"] == 2
+
+
+# ---------------------------------------------------------------- 自动偏移校准
+
+
+async def test_auto_calibration_applies_offset_from_ai_subtitle(service, monkeypatch):
+    service.bili = FakeBili(
+        tracks=[AI_TRACK], bodies={AI_TRACK["url"]: calibration_body(3.5)}
+    )
+
+    async def fake_search(params):
+        return [calibration_record()]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    result = await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    assert result["source"] == "lrclib"
+    assert result["offset"] == pytest.approx(3.5)
+    assert result["meta"]["offset_source"] == "auto"
+    assert result["meta"]["auto_offset"] == pytest.approx(3.5)
+    assert result["meta"]["auto_offset_confidence"] > 0
+    prefs = service.preferences(BV)
+    assert prefs["offset"] == pytest.approx(3.5)
+    assert prefs["offset_mode"] == "auto"
+
+
+async def test_manual_offset_is_not_overwritten_by_calibration(service, monkeypatch):
+    service.bili = FakeBili(
+        tracks=[AI_TRACK], bodies={AI_TRACK["url"]: calibration_body(3.5)}
+    )
+    service.update_prefs(BV, offset=2.0)
+
+    async def fake_search(params):
+        return [calibration_record()]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    result = await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    assert result["offset"] == pytest.approx(2.0)
+    assert result["meta"]["offset_source"] == "manual"
+    # 校准值仍然返回，方便界面解释/排查
+    assert result["meta"]["auto_offset"] == pytest.approx(3.5)
+    assert service.preferences(BV)["offset"] == pytest.approx(2.0)
+
+
+def test_calibration_rechecks_manual_prefs_before_writing(service):
+    # 模拟：解析开始后又收到用户手动偏移，校准写盘前必须重读并让 manual 胜出
+    service.update_prefs(BV, offset=2.0)
+    stale = lyrics.LyricsService._default_prefs()
+    record = calibration_record()
+    result = lyrics._ok_result(
+        "lrclib", "", [lyrics.LyricLine(40.0, "第0句歌词内容各不相同")], True
+    )
+    subtitle = [
+        lyrics.LyricLine(43.5 + index * 5, f"第{index}句歌词内容各不相同")
+        for index in range(16)
+    ]
+    calibrated = service._calibrate(BV, result, stale, record, subtitle)
+    assert calibrated["meta"]["auto_offset"] == pytest.approx(3.5)
+    assert calibrated["meta"]["offset_source"] == "manual"
+    prefs = service.preferences(BV)
+    assert prefs["offset"] == pytest.approx(2.0)
+    assert prefs["offset_mode"] == "manual"
+
+
+async def test_cached_result_keeps_auto_offset(service, monkeypatch):
+    fake = FakeBili(
+        tracks=[AI_TRACK], bodies={AI_TRACK["url"]: calibration_body(3.5)}
+    )
+    service.bili = fake
+
+    async def fake_search(params):
+        return [calibration_record()]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    calls = len(fake.calls)
+
+    second = await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    assert second["meta"]["cached"] is True
+    assert second["offset"] == pytest.approx(3.5)
+    assert second["meta"]["offset_source"] == "auto"
+    assert len(fake.calls) == calls
+
+
+async def test_refresh_recalibrates_auto_offset(service, monkeypatch):
+    body = calibration_body(3.5)
+    service.bili = FakeBili(tracks=[AI_TRACK], bodies={AI_TRACK["url"]: body})
+
+    async def fake_search(params):
+        return [calibration_record()]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    await service.resolve(BV, title="夜航星 - 不才", duration=304)
+
+    body["body"] = calibration_body(-4.0)["body"]
+    result = await service.resolve(
+        BV, title="夜航星 - 不才", duration=304, refresh=True
+    )
+    assert result["offset"] == pytest.approx(-4.0)
+    assert result["meta"]["offset_source"] == "auto"
+
+
+def test_old_prefs_without_mode_migrate(service):
+    service.prefs_path(BV).parent.mkdir(parents=True, exist_ok=True)
+    service.prefs_path(BV).write_text(
+        json.dumps({"offset": 2.0, "pin": None}), encoding="utf-8"
+    )
+    assert service.preferences(BV)["offset_mode"] == "manual"
+
+    service.prefs_path(BV).write_text(
+        json.dumps({"offset": 0.0, "pin": None}), encoding="utf-8"
+    )
+    assert service.preferences(BV)["offset_mode"] == "auto"
+
+
+def test_update_prefs_offset_mode_roundtrip(service):
+    prefs = service.update_prefs(BV, offset=2.5)
+    assert prefs["offset_mode"] == "manual"
+    prefs = service.update_prefs(BV, offset_mode="auto")
+    assert prefs["offset"] == 0.0
+    assert prefs["offset_mode"] == "auto"
+    with pytest.raises(ValueError):
+        service.update_prefs(BV, offset_mode="bogus")
+
+
+async def test_sources_reuse_resolve_snapshot(service, monkeypatch):
+    fake = FakeBili(
+        tracks=[AI_TRACK], bodies={AI_TRACK["url"]: calibration_body(0.0)}
+    )
+    service.bili = fake
+    calls = {"n": 0}
+
+    async def fake_search(params):
+        calls["n"] += 1
+        return [record()]
+
+    monkeypatch.setattr(service, "_fetch_search", fake_search)
+    await service.resolve(BV, title="夜航星 - 不才", duration=304)
+    search_calls = calls["n"]
+    bili_calls = len(fake.calls)
+
+    # 换源面板即使拿到不同的标题文案，也应复用刚解析出的快照
+    items = await service.sources(BV, title="完全不同的标题", duration=304)
+    by_source = {item["source"]: item for item in items}
+    assert by_source["lrclib"]["available"] is True
+    assert calls["n"] == search_calls
+    assert len(fake.calls) == bili_calls
+
+
+
 
 
 # ---------------------------------------------------------------- 字幕转换
@@ -827,7 +1302,7 @@ async def test_cache_hit_skips_fetch(service, monkeypatch):
     monkeypatch.setattr(service, "_fetch_search", fake_search)
     first = await service.resolve(BV, title="夜航星 - 不才", duration=304)
     assert first["meta"]["cached"] is False
-    assert calls["n"] == 1
+    assert calls["n"] == len(planned_queries("夜航星 - 不才"))
 
     async def boom(params):
         raise AssertionError("命中缓存后不应再请求 LRCLIB")
@@ -853,7 +1328,6 @@ async def test_refresh_bypasses_cache(service, monkeypatch):
     result = await service.resolve(BV, title="夜航星 - 不才", duration=304, refresh=True)
     assert result["meta"]["cached"] is False
     assert [line["text"] for line in result["lines"]] == ["新"]
-
 
 async def test_ok_cache_lives_thirty_days(service, monkeypatch):
     async def fake_search(params):
@@ -918,7 +1392,7 @@ async def test_cache_version_mismatch_is_discarded(service, monkeypatch):
         encoding="utf-8",
     )
     result = await service.resolve(BV, title="夜航星 - 不才", duration=304)
-    assert calls["n"] == 1
+    assert calls["n"] == len(planned_queries("夜航星 - 不才"))
     assert [line["text"] for line in result["lines"]] == ["夜航星"]
 
 
@@ -1055,7 +1529,7 @@ async def test_disabled_none_result_is_not_cached(service, monkeypatch):
     second = await service.resolve(BV, title="夜航星 - 不才", duration=304)
     assert second["status"] == "ok"
     assert second["source"] == "lrclib"
-    assert calls["n"] == 1
+    assert calls["n"] == len(planned_queries("夜航星 - 不才"))
 
 
 async def test_not_logged_in_none_result_is_not_cached(service, monkeypatch):
@@ -1074,7 +1548,7 @@ async def test_not_logged_in_none_result_is_not_cached(service, monkeypatch):
     service.bili = None
     second = await service.resolve(BV, title="夜航星 - 不才", duration=304)
     assert second["source"] == "lrclib"
-    assert calls["n"] == 1
+    assert calls["n"] == len(planned_queries("夜航星 - 不才"))
 
 
 async def test_stale_disabled_cache_is_ignored(service, monkeypatch):
@@ -1101,7 +1575,7 @@ async def test_stale_disabled_cache_is_ignored(service, monkeypatch):
     )
     result = await service.resolve(BV, title="夜航星 - 不才", duration=304)
     assert result["source"] == "lrclib"
-    assert calls["n"] == 1
+    assert calls["n"] == len(planned_queries("夜航星 - 不才"))
 
 
 async def test_pinned_source_skips_cache_and_retries_after_timeout(service, monkeypatch):

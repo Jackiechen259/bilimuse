@@ -299,7 +299,27 @@ def test_offset_applied_to_demo_lyrics(api):
     api.client.post("/api/lyrics/DEMO0001/prefs", json={"offset": 2.5})
     data = api.client.get("/api/lyrics/DEMO0001").json()
     assert data["offset"] == 2.5
+    assert data["meta"]["offset_source"] == "manual"
+    assert data["meta"]["auto_offset"] is None
     assert len(data["lines"]) == 8
+
+
+def test_offset_mode_roundtrip(api):
+    resp = api.client.post(f"/api/lyrics/{BV}/prefs", json={"offset": 2.5})
+    assert resp.status_code == 200
+    assert resp.json()["offset_mode"] == "manual"
+
+    resp = api.client.post(f"/api/lyrics/{BV}/prefs", json={"offset_mode": "auto"})
+    assert resp.status_code == 200
+    assert resp.json()["offset"] == 0.0
+    assert resp.json()["offset_mode"] == "auto"
+
+    assert (
+        api.client.post(
+            f"/api/lyrics/{BV}/prefs", json={"offset_mode": "bogus"}
+        ).status_code
+        == 400
+    )
 
 
 def test_prefs_pin_and_clear(api):
@@ -426,6 +446,7 @@ def test_sources_show_manual_subtitles(api, monkeypatch):
         "id": 31664182,
         "track": "夜航星",
         "artist": "不才",
+        "duration": 304,
     }
 
 

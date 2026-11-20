@@ -260,6 +260,7 @@ fun BiliMuseRoot(viewModel: MainViewModel = viewModel()) {
                 onLoadMoreQueue = viewModel::loadMoreQueue,
                 onToggleLyrics = viewModel::toggleLyrics,
                 onLyricsOffset = viewModel::setLyricsOffset,
+                onLyricsResetOffset = viewModel::resetLyricsOffset,
                 onImportLyrics = {
                     lyricsFileLauncher.launch(
                         arrayOf("text/plain", "application/octet-stream", "*/*"),

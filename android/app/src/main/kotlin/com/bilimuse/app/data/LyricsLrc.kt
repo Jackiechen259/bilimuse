@@ -65,8 +65,9 @@ object LyricsLrc {
     fun parse(text: String): ParseResult {
         if (text.isEmpty()) return ParseResult(synced = false, lines = emptyList())
 
-        // offset 是全局的，先取第一条；负偏移把时间压到 0 以下时按 0 处理。
-        val offsetMs = OFFSET_TAG.find(text)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+        // offset 是全局的；多个标签以最后一个为准（与 Python 一致）。
+        val offsetMs = OFFSET_TAG.findAll(text).lastOrNull()?.groupValues?.get(1)
+            ?.toLongOrNull() ?: 0L
 
         val timed = ArrayList<TimedLine>()
         val staticLines = ArrayList<String>()

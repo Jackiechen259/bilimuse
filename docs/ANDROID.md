@@ -392,11 +392,13 @@ MediaController ──(timeline / shuffle 变化)──> PlayerController.queue
   「回到当前」，点它或切歌后恢复。
 - 点行 seek：同步歌词点任意一行跳到 `timeMs + offsetMs`；静态歌词（`synced=false`）不跟随、
   不显示偏移控件。
-- 偏移：步进 ±0.5s、范围 ±30s、可一键复位，按 bvid 持久化；工具行同时显示来源标签与
-  LRCLIB 匹配到的歌名 / 歌手。
+- 偏移：步进 ±0.5s、范围 ±30s、可一键复位，按 bvid 持久化；LRCLIB 命中且本视频有字幕时
+  会自动校准整首偏移，工具行显示「自动校准」/「手动」徽标；复位并重新解析可恢复自动校准。
+  工具行同时显示来源标签与 LRCLIB 匹配到的歌名 / 歌手。
 - 换源：工具行「换源」用 `ModalBottomSheet` 列出 `LyricsRepository.sources()` 的各来源可用性
   （含「自动匹配」）；选 `bili` / `local` / `demo` 调 `setPin()` 后重新解析，选 LRCLIB 候选走
-  `useCandidate()`，「自动匹配」清掉 pin。
+  `useCandidate()`，「自动匹配」清掉 pin。解析后 5 分钟内换源面板复用解析快照，不再重复请求
+  B 站 / LRCLIB。
 - 搜索：工具行「搜索」弹对话框，预填 `LyricsMatch.searchQuery()` 清洗后的歌名 / 歌手，输入
   防抖 400ms 查 `LyricsRepository.search()`，点某条候选 `useCandidate()` 并立即刷新。
 - 导入：`ActivityResultContracts.OpenDocument` 拉起系统文件选择器（`text/plain` 优先，兼容

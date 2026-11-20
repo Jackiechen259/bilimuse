@@ -23,7 +23,9 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** 歌词仓库：来源阶梯、缓存、B 站字幕、LRCLIB 与安全约束。 */
 class LyricsRepositoryTest {
@@ -81,13 +83,19 @@ class LyricsRepositoryTest {
         assertEquals("夜航星", result.meta.matched?.track)
         assertFalse(result.meta.cached)
 
-        val request = server.takeRequest()
-        assertEquals("/api/search", request.requestUrl!!.encodedPath)
-        assertEquals("夜航星", request.requestUrl!!.queryParameter("track_name"))
-        assertEquals("不才", request.requestUrl!!.queryParameter("artist_name"))
-        assertNull("LRCLIB 请求不能带 Cookie", request.getHeader("Cookie"))
-        assertNull("LRCLIB 请求不能带 Referer", request.getHeader("Referer"))
-        assertTrue(request.getHeader("User-Agent")!!.startsWith("BiliMuse/"))
+        val requests = drainRequests()
+        assertTrue(requests.isNotEmpty())
+        assertTrue(requests.all { it.requestUrl!!.encodedPath == "/api/search" })
+        val primary = requests.firstOrNull {
+            it.requestUrl!!.queryParameter("track_name") == "夜航星" &&
+                it.requestUrl!!.queryParameter("artist_name") == "不才"
+        }
+        assertNotNull("应包含 track_name=夜航星&artist_name=不才 的查询", primary)
+        requests.forEach { request ->
+            assertNull("LRCLIB 请求不能带 Cookie", request.getHeader("Cookie"))
+            assertNull("LRCLIB 请求不能带 Referer", request.getHeader("Referer"))
+            assertTrue(request.getHeader("User-Agent")!!.startsWith("BiliMuse/"))
+        }
     }
 
     @Test
@@ -251,19 +259,19 @@ class LyricsRepositoryTest {
         val first = runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
         assertEquals("ok", first.status)
         assertFalse(first.meta.cached)
-        assertEquals(1, server.requestCount)
+        assertEquals(planSize("夜航星 - 不才"), server.requestCount)
 
         val second = runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
         assertEquals("ok", second.status)
         assertTrue("命中缓存应标记 cached", second.meta.cached)
-        assertEquals(1, server.requestCount)
+        assertEquals(planSize("夜航星 - 不才"), server.requestCount)
 
         val refreshed = runBlocking {
             repo.resolve(bvid, "夜航星 - 不才", "不才", 304, refresh = true)
         }
         assertEquals("ok", refreshed.status)
         assertFalse(refreshed.meta.cached)
-        assertEquals(2, server.requestCount)
+        assertEquals(planSize("夜航星 - 不才") * 2, server.requestCount)
     }
 
     @Test
@@ -273,13 +281,13 @@ class LyricsRepositoryTest {
         val repo = repository()
         val first = runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
         assertEquals(0L, first.offsetMs)
-        assertEquals(1, server.requestCount)
+        assertEquals(planSize("夜航星 - 不才"), server.requestCount)
 
         repo.setOffset(bvid, 500L)
         val second = runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
         assertTrue(second.meta.cached)
         assertEquals("缓存命中时偏移应取最新偏好", 500L, second.offsetMs)
-        assertEquals(1, server.requestCount)
+        assertEquals(planSize("夜航星 - 不才"), server.requestCount)
     }
 
     @Test
@@ -293,7 +301,7 @@ class LyricsRepositoryTest {
         val result = runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
         assertEquals("none", result.status)
         assertEquals("disabled", result.reason)
-        assertEquals("关闭来源后不应吃该来源的缓存", 1, server.requestCount)
+        assertEquals("关闭来源后不应吃该来源的缓存", planSize("夜航星 - 不才"), server.requestCount)
     }
 
     @Test
@@ -302,15 +310,15 @@ class LyricsRepositoryTest {
         respond { json(JsonArray(listOf(recordJson()))) }
         val repo = repository()
         runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
-        assertEquals(1, server.requestCount)
+        assertEquals(planSize("夜航星 - 不才"), server.requestCount)
 
         now += TimeUnit.DAYS.toMillis(29)
         runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
-        assertEquals("30 天内命中缓存", 1, server.requestCount)
+        assertEquals("30 天内命中缓存", planSize("夜航星 - 不才"), server.requestCount)
 
         now += TimeUnit.DAYS.toMillis(2)
         runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
-        assertEquals("超过 30 天应重新请求", 2, server.requestCount)
+        assertEquals("超过 30 天应重新请求", planSize("夜航星 - 不才") * 2, server.requestCount)
     }
 
     @Test
@@ -322,16 +330,16 @@ class LyricsRepositoryTest {
         val first = runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
         assertEquals("none", first.status)
         assertEquals("not_found", first.reason)
-        // 候选 1（track+artist）→ q=完整标题 → track 单独，共三步。
-        assertEquals(3, server.requestCount)
+        // 两个候选 + q=完整标题 + 第一个候选单独曲名，共四条并行查询。
+        assertEquals(planSize("夜航星 - 不才"), server.requestCount)
 
         val second = runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
         assertEquals("none", second.status)
-        assertEquals(3, server.requestCount)
+        assertEquals(planSize("夜航星 - 不才"), server.requestCount)
 
         now += TimeUnit.HOURS.toMillis(7)
         runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
-        assertEquals("超过 6 小时应重新请求", 6, server.requestCount)
+        assertEquals("超过 6 小时应重新请求", planSize("夜航星 - 不才") * 2, server.requestCount)
     }
 
     // ------------------------------------------------------------ B 站字幕
@@ -819,6 +827,185 @@ class LyricsRepositoryTest {
         assertEquals("/x/player/pagelist", server.takeRequest().requestUrl!!.encodedPath)
     }
 
+    // ------------------------------------------------------------ 匹配优化 / 自动校准
+
+    @Test
+    fun lrclibQueriesRunInParallel() {
+        val started = CountDownLatch(2)
+        val overlapped = AtomicBoolean(false)
+        respond { request ->
+            if (request.requestUrl!!.encodedPath == "/api/search") {
+                started.countDown()
+                if (started.await(1500, TimeUnit.MILLISECONDS)) overlapped.set(true)
+                json(JsonArray(listOf(recordJson())))
+            } else {
+                MockResponse().setResponseCode(404)
+            }
+        }
+        val begin = System.nanoTime()
+        val result = runBlocking { repository().resolve(bvid, "夜航星 - 不才", "不才", 304) }
+        val elapsedMs = (System.nanoTime() - begin) / 1_000_000
+        assertEquals("ok", result.status)
+        assertTrue("LRCLIB 查询应并行发出", overlapped.get())
+        assertTrue("并行查询应在 2 秒内完成，实际 $elapsedMs ms", elapsedMs < 2000)
+    }
+
+    @Test
+    fun lrclibSearchResultsAreCachedAcrossBvids() {
+        respond { json(JsonArray(listOf(recordJson()))) }
+        val repo = repository()
+        runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
+        assertTrue(drainPaths().count { it == "/api/search" } > 0)
+
+        runBlocking { repo.resolve("BV1xx411c7mE", "夜航星 - 不才", "不才", 304) }
+        assertEquals(0, drainPaths().count { it == "/api/search" })
+    }
+
+    @Test
+    fun usesBiliPageDurationWhenRequestOmitsIt() {
+        fakeBili.pageDuration = 304
+        respond { json(JsonArray(listOf(recordJson(duration = 900)))) }
+        val result = runBlocking { repository().resolve(bvid, "夜航星 - 不才", "不才", 0) }
+        assertEquals("none", result.status)
+    }
+
+    @Test
+    fun acceptsRecordWhenPageDurationMatches() {
+        fakeBili.pageDuration = 304
+        respond { json(JsonArray(listOf(recordJson(duration = 304)))) }
+        val result = runBlocking { repository().resolve(bvid, "夜航星 - 不才", "不才", 0) }
+        assertEquals("ok", result.status)
+        assertEquals("lrclib", result.source)
+    }
+
+    @Test
+    fun lrclibResponseBodyIsCappedAtFourMegabytes() {
+        val hugePlain = "x".repeat(4 * 1024 * 1024)
+        respond {
+            json(JsonArray(listOf(recordJson(plainLyrics = hugePlain))))
+        }
+        val result = runBlocking { repository().resolve(bvid, "夜航星 - 不才", "不才", 304) }
+        assertFalse("超过 4MB 的 LRCLIB 响应必须降级", result.ok)
+    }
+
+    @Test
+    fun mergedRecordsPreferVersionWithLyrics() {
+        respond { request ->
+            val hasTrackName = request.requestUrl!!.queryParameter("track_name") != null
+            json(
+                JsonArray(
+                    listOf(
+                        recordJson(
+                            syncedLyrics = if (hasTrackName) null else "[00:12.00]执念的鱼",
+                            plainLyrics = null,
+                        ),
+                    ),
+                ),
+            )
+        }
+        val result = runBlocking { repository().resolve(bvid, "夜航星 - 不才", "不才", 304) }
+        assertEquals("ok", result.status)
+        assertEquals("lrclib", result.source)
+    }
+
+    @Test
+    fun autoCalibrationAppliesOffsetFromAiSubtitle() {
+        fakeBili.tracks = listOf(aiTrack())
+        fakeBili.body = calibrationSubtitle(shift = 3.5)
+        respond { json(JsonArray(listOf(calibrationRecordJson()))) }
+
+        val result = runBlocking {
+            repository().resolve(bvid, "夜航星 - 不才", "不才", 304)
+        }
+        assertEquals("ok", result.status)
+        assertEquals("lrclib", result.source)
+        assertEquals(3500L, result.offsetMs)
+        assertEquals("auto", result.offsetSource)
+        assertEquals(3500L, result.meta.autoOffsetMs)
+        assertTrue((result.meta.autoOffsetConfidence ?: 0.0) > 0.0)
+    }
+
+    @Test
+    fun useCandidateSkipsSubtitlesWhenBiliDisabled() {
+        settings = EngineSettings(lyricsBili = false)
+        fakeBili.tracks = listOf(aiTrack())
+        respond { request ->
+            if (request.requestUrl!!.encodedPath == "/api/get/42") {
+                json(recordJson(id = 42L))
+            } else {
+                MockResponse().setResponseCode(404)
+            }
+        }
+        val result = runBlocking { repository().useCandidate(bvid, 42L) }
+        assertEquals("ok", result.status)
+        assertEquals("关闭 B 站字幕后不应为校准下载字幕", 0, fakeBili.totalCalls)
+    }
+
+    @Test
+    fun pinnedLrclibSkipsSubtitlesWhenBiliDisabled() {
+        settings = EngineSettings(lyricsBili = false)
+        fakeBili.tracks = listOf(aiTrack())
+        respond { request ->
+            if (request.requestUrl!!.encodedPath == "/api/get/42") {
+                json(recordJson(id = 42L))
+            } else {
+                MockResponse().setResponseCode(404)
+            }
+        }
+        val repo = repository()
+        repo.setPin(bvid, LyricsRepository.SOURCE_LRCLIB, 42L)
+        val result = runBlocking { repo.resolve(bvid, "夜航星", "不才", 304) }
+        assertEquals("ok", result.status)
+        assertEquals(0, fakeBili.totalCalls)
+    }
+
+    @Test
+    fun manualOffsetIsNotOverwrittenByCalibration() {
+        fakeBili.tracks = listOf(aiTrack())
+        fakeBili.body = calibrationSubtitle(shift = 3.5)
+        respond { json(JsonArray(listOf(calibrationRecordJson()))) }
+        val repo = repository()
+        repo.setOffset(bvid, 2000L)
+
+        val result = runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
+        assertEquals(2000L, result.offsetMs)
+        assertEquals("manual", result.offsetSource)
+        assertEquals(3500L, result.meta.autoOffsetMs)
+        assertEquals(2000L, repo.preferences(bvid).offsetMs)
+    }
+
+    @Test
+    fun cachedResultKeepsAutoOffset() {
+        fakeBili.tracks = listOf(aiTrack())
+        fakeBili.body = calibrationSubtitle(shift = 3.5)
+        respond { json(JsonArray(listOf(calibrationRecordJson()))) }
+        val repo = repository()
+        runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
+        val calls = fakeBili.totalCalls
+
+        val second = runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
+        assertTrue(second.meta.cached)
+        assertEquals(3500L, second.offsetMs)
+        assertEquals("auto", second.offsetSource)
+        assertEquals(calls, fakeBili.totalCalls)
+    }
+
+    @Test
+    fun sourcesReuseResolveSnapshot() {
+        fakeBili.tracks = listOf(aiTrack())
+        respond { json(JsonArray(listOf(recordJson()))) }
+        val repo = repository()
+        runBlocking { repo.resolve(bvid, "夜航星 - 不才", "不才", 304) }
+        val calls = fakeBili.totalCalls
+        val searches = drainPaths().count { it == "/api/search" }
+
+        val items = runBlocking { repo.sources(bvid, "夜航星 - 不才", "不才", 304) }
+        assertTrue(items.any { it.source == LyricsRepository.SOURCE_LRCLIB && it.available })
+        assertEquals("换源菜单应复用解析快照", calls, fakeBili.totalCalls)
+        assertEquals("换源菜单不应再次搜索 LRCLIB", 0, drainPaths().count { it == "/api/search" })
+        assertTrue(searches > 0)
+    }
+
     // ------------------------------------------------------------ 辅助
 
     private fun repository(
@@ -894,6 +1081,37 @@ class LyricsRepositoryTest {
         File(configDir, "$bvid.lrc").writeText(text, Charsets.UTF_8)
     }
 
+    private fun planSize(title: String, upper: String = "不才"): Int =
+        LyricsMatch.queryPlan(
+            LyricsMatch.candidates(title, upper),
+            LyricsMatch.cleanTitle(title),
+        ).size
+
+    private fun aiTrack(): SubtitleTrack = SubtitleTrack(
+        lan = "ai-zh",
+        lanDoc = "中文（AI）",
+        url = "https://aisubtitle.hdslb.com/ai.json",
+        isAi = true,
+    )
+
+    private fun calibrationRecordJson(): JsonObject {
+        val lines = (0 until 16).joinToString("\n") { index ->
+            val second = 40 + index * 5
+            "[%02d:%02d.00]第${index}句歌词内容各不相同".format(second / 60, second % 60)
+        }
+        return recordJson(id = 42L, syncedLyrics = lines)
+    }
+
+    private fun calibrationSubtitle(shift: Double): JsonObject = subtitleJson(
+        *(0 until 16).map { index ->
+            Triple(
+                40.0 + index * 5 + shift,
+                41.0 + index * 5 + shift,
+                "♪第${index}句歌词内容各不相同♪",
+            )
+        }.toTypedArray(),
+    )
+
     private class MemorySessionSink : SessionSink {
         private var data = SessionData()
         override fun load(): SessionData = data
@@ -910,6 +1128,7 @@ class LyricsRepositoryTest {
         override var loggedIn: Boolean = true
         var tracks: List<SubtitleTrack> = emptyList()
         var body: JsonObject = JsonObject(emptyMap())
+        var pageDuration: Int = 0
         var pageInfoCalls = 0
         var subtitleTrackCalls = 0
         var subtitleBodyCalls = 0
@@ -917,7 +1136,7 @@ class LyricsRepositoryTest {
 
         override suspend fun pageInfo(bvid: String): BiliClient.PageInfo {
             pageInfoCalls++
-            return BiliClient.PageInfo(cid = 7L, duration = 0, part = "P1")
+            return BiliClient.PageInfo(cid = 7L, duration = pageDuration, part = "P1")
         }
 
         override suspend fun subtitleTracks(bvid: String, cid: Long): List<SubtitleTrack> {

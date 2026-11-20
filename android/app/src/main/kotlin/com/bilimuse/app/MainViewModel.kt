@@ -1175,8 +1175,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         lyricsRepository.setOffset(bvid, next)
         _lyrics.update { state ->
             val current = state.result ?: return@update state
-            state.copy(result = current.copy(offsetMs = next))
+            state.copy(
+                result = current.copy(
+                    offsetMs = next,
+                    offsetSource = if (next == 0L) "" else "manual",
+                ),
+            )
         }
+    }
+
+    /** 复位：清掉手动偏移并重新解析，让自动校准重新生效。 */
+    fun resetLyricsOffset() {
+        val result = _lyrics.value.result ?: return
+        if (!result.synced) return
+        val bvid = playerState.value.bvid
+        if (bvid.isEmpty()) return
+        lyricsRepository.setOffsetModeAuto(bvid)
+        _lyrics.update { state ->
+            val current = state.result ?: return@update state
+            state.copy(result = current.copy(offsetMs = 0L, offsetSource = ""))
+        }
+        reloadLyrics()
     }
 
     /**

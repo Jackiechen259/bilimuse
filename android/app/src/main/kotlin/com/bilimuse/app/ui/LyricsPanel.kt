@@ -97,6 +97,7 @@ fun LyricsPanel(
     searchSeed: String,
     onSeek: (Long) -> Unit,
     onOffset: (Long) -> Unit,
+    onResetOffset: () -> Unit,
     onImport: () -> Unit,
     onReload: () -> Unit,
     onClose: () -> Unit,
@@ -182,6 +183,7 @@ fun LyricsPanel(
             result = result,
             loading = loading,
             onOffset = onOffset,
+            onResetOffset = onResetOffset,
             onImport = onImport,
             onReload = onReload,
             onOpenSources = { sourcesOpen = true },
@@ -276,6 +278,7 @@ private fun LyricsToolbar(
     result: LyricsResult?,
     loading: Boolean,
     onOffset: (Long) -> Unit,
+    onResetOffset: () -> Unit,
     onImport: () -> Unit,
     onReload: () -> Unit,
     onOpenSources: () -> Unit,
@@ -383,6 +386,14 @@ private fun LyricsToolbar(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                val offsetSource = result?.takeIf { it.ok }?.offsetSource.orEmpty()
+                if (offsetSource == "auto" || offsetSource == "manual") {
+                    InfoChip(
+                        text = if (offsetSource == "auto") "自动校准" else "手动",
+                        color = if (offsetSource == "auto") BiliPinkText else BiliMuted,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
                 TextButton(
                     onClick = { onOffset(-OFFSET_STEP_MS) },
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
@@ -396,7 +407,7 @@ private fun LyricsToolbar(
                     modifier = Modifier.padding(horizontal = 6.dp),
                 )
                 TextButton(
-                    onClick = { onOffset(-offsetMs) },
+                    onClick = onResetOffset,
                     enabled = offsetMs != 0L,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                 ) {

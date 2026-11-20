@@ -2672,6 +2672,20 @@ function lyricsRenderToolbar() {
   const value = state.lyricsPrefs.offset || 0;
   const valueEl = $('np-lyrics-offset-value');
   if (valueEl) valueEl.textContent = `${value >= 0 ? '+' : '−'}${Math.abs(value).toFixed(1)}s`;
+  const autoBtn = $('np-lyrics-offset-auto');
+  if (autoBtn) {
+    const source = synced && res.meta ? res.meta.offset_source : '';
+    const show = source === 'auto' || source === 'manual';
+    autoBtn.classList.toggle('hidden', !show);
+    autoBtn.classList.toggle('is-auto', source === 'auto');
+    if (show) {
+      autoBtn.textContent = source === 'auto' ? '自动校准' : '手动';
+      autoBtn.dataset.mode = source;
+      autoBtn.title = source === 'auto'
+        ? '已按 B 站字幕自动校准；点击重新匹配'
+        : '当前为手动偏移；点击恢复自动校准';
+    }
+  }
   const tools = $('np-lyrics-tools');
   if (tools) tools.classList.toggle('is-busy', Boolean(state.lyricsLoading));
   const bvid = lyricsBvid();
@@ -2701,6 +2715,30 @@ function lyricsNudgeOffset(delta) {
   lyricsApplyOffset((state.lyricsPrefs.offset || 0) + delta);
 }
 
+/** 偏移区徽标：自动校准显示状态并可重新匹配；手动时点击恢复自动校准。 */
+async function lyricsOffsetBadgeClick() {
+  const res = lyricsCurrentResult();
+  if (!state.lyricsOpen || !res || !res.synced) return;
+  const mode = res.meta ? res.meta.offset_source : '';
+  if (mode === 'auto') {
+    lyricsRematch();
+    return;
+  }
+  const bvid = lyricsBvid();
+  if (!bvid) return;
+  try {
+    await api(`/api/lyrics/${encodeURIComponent(bvid)}/prefs`, {
+      method: 'POST',
+      body: JSON.stringify({ offset_mode: 'auto' }),
+    });
+  } catch (err) {
+    showNpToast(`恢复自动校准失败：${err.message}`, true);
+    return;
+  }
+  state.lyricsPrefs.offset = 0;
+  lyricsLoadCurrent({ refresh: true });
+}
+
 function lyricsApplyOffset(value) {
   const next = Math.max(
     LYRICS_OFFSET_MIN,
@@ -2708,6 +2746,10 @@ function lyricsApplyOffset(value) {
   );
   if (!Number.isFinite(next) || next === state.lyricsPrefs.offset) return;
   state.lyricsPrefs.offset = next;
+  if (state.lyrics && state.lyrics.meta) {
+    // 手动调偏后本地立刻切到 manual；服务端保存时也会写 manual
+    state.lyrics.meta.offset_source = next ? 'manual' : '';
+  }
   lyricsRenderToolbar();
   lyricsUpdateActive({ force: true });
   if (!state.lyricsUserScrolled) lyricsCenterActive();
@@ -4272,6 +4314,7 @@ $('np-engine-backdrop').addEventListener('click', () => npSetEngine(false, { foc
 $('np-lyrics-btn').addEventListener('click', () => lyricsToggle(!state.lyricsOpen));
 $('np-lyrics-offset-down').addEventListener('click', () => lyricsNudgeOffset(-LYRICS_OFFSET_STEP));
 $('np-lyrics-offset-up').addEventListener('click', () => lyricsNudgeOffset(LYRICS_OFFSET_STEP));
+$('np-lyrics-offset-auto').addEventListener('click', lyricsOffsetBadgeClick);
 $('np-lyrics-rematch').addEventListener('click', lyricsRematch);
 $('np-lyrics-import-btn').addEventListener('click', lyricsPickFile);
 $('np-lyrics-empty-import').addEventListener('click', lyricsPickFile);

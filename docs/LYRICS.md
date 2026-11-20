@@ -31,7 +31,7 @@ LRC 仍然排在演示歌词前面。
 - 本地文件是用户自己的选择，必须最优先。
 - 人工字幕是 UP 主/观众逐句录入的，时间轴与本视频音频完全一致，词也准确。
 - LRCLIB 词最准，但 B 站视频常带前奏、口白、Live 垫场，整首会整体偏移几秒——所以
-  LRCLIB 命中后必须提供偏移调节。它排在人工字幕之后、AI 字幕之前。
+  LRCLIB 命中后会用同视频的 B 站字幕自动校准整首偏移，并保留手动微调。它排在人工字幕之后、AI 字幕之前。
 - AI 字幕是本视频音频的语音识别，时间轴准，但歌词经常转错，只能兜底。
 
 ## LRC 解析
@@ -40,7 +40,7 @@ LRC 仍然排在演示歌词前面。
 
 - 支持 `[mm:ss]`、`[mm:ss.x]`、`[mm:ss.xx]`、`[mm:ss.xxx]`，也支持 `[m:ss]`。
 - 一行可带多个时间标签（`[00:12.00][01:30.00]歌词`），展开成多行。
-- `[offset:±毫秒]` 在解析时叠加到所有时间上。
+- `[offset:±毫秒]` 在解析时叠加到所有时间上；多个 `[offset:]` 以最后一个为准。
 - 忽略 `[ti:]` `[ar:]` `[al:]` `[by:]` `[length:]` 等元信息标签和注释行。
 - 空歌词行保留为空白行参与滚动，但首尾各裁掉，最多保留连续 2 个空行。
 - 时间必须非负；同一时间戳的重复文本只保留一条。
@@ -53,26 +53,45 @@ B 站标题是给人看的，不是给曲库搜的（实测 `【纯享版】孤�
 所以先清洗再匹配：
 
 1. 全角转半角，统一大小写（英文），压缩空白。
-2. 去掉 `【】 [] （） () 《》 「」 『』` 包裹的片段，以及其中的噪声词：
+2. 去掉 `【】 [] （） ()` 包裹的片段（版本 / 画质标签），以及其中的噪声词：
    `4K 1080P 60帧 高音质 无损 官方 MV PV 纯享 完整版 现场 Live 中文字幕 动态歌词
    HD HQ 首播 臻享 花絮 翻唱 伴奏 纯音乐 合集 完整版 无损音质`。
-   注意：「翻唱」去掉的是标签，不是歌曲本身，歌名/歌手照常保留。
-3. 生成候选 `(track, artist)`，最多两个：
+   `《》「」『』` 是歌名引号：只去符号、**保留内容**（日文 / 引号歌名不会整段丢失）。
+   `feat.` / `ft.` / `featuring` 子句整段移除，不算曲名。
+3. 生成候选 `(track, artist)`，最多三个、去重：
    - 先用 ` - ` / ` — ` / ` – ` / `－` 分隔：左歌名、右歌手；
-   - 再取 `《》` 里的内容当歌名，括号外其余文字当歌手；
+   - 同一分隔的**反向** `(右, 左)` 也作为候选（兼容「歌手 - 歌名」写法）；
+   - 再取 `《》/「」/『』` 里的内容当歌名，括号外其余文字当歌手；
    - 都没有时整串当歌名，UP 主名当歌手提示。
-4. 依次请求 LRCLIB，任一步有结果即停止：
-   - `track_name=<track>&artist_name=<artist>`（artist 为空则省略该参数）
-   - `q=<清洗后的完整标题>`
-   - `track_name=<track>` 单独
+4. 查询计划（去重后最多 4 条，全部并行）：
+   - 候选 1 `track_name=<track>&artist_name=<artist>`（artist 为空则省略）；
+   - 候选 2 同上；
+   - `q=<清洗后的完整标题>`；
+   - 候选 1 单独 `track_name`。
 5. 打分（0–1）：`track*0.6 + artist*0.2 + duration*0.2`
    - track：归一化后完全相等 1.0；一方包含另一方 0.8；字符二元组重合率；否则 0。
    - artist：与候选歌手或 UP 主归一化后相等 0.9、包含 0.5，否则 0。
+     歌手串按 `, & / 、 ; feat. ft. featuring` 拆分后交叉比较（`A feat. B` 能匹配 `A`）。
    - duration：`diff = |候选时长 - 视频时长|` 秒；`diff ≤ 2` 得 1.0，否则
-     `max(0, 1 - (diff - 2) / 60)`。候选比视频还长太多通常不是同一首。
-6. 直接丢弃 `instrumental=true` 的条目；优先 `syncedLyrics`，只有 `plainLyrics` 时按静态歌词返回。
-7. 接受条件：总分 ≥ **0.62** 且 track 分 ≥ **0.7**。同一分数取时长更接近的。
-8. 结果里必须带上 `matched`（歌名、歌手、时长、LRCLIB id），界面要显示——选错歌时用户能看出来并自己改。
+     `max(0, 1 - (diff - 2) / 60)`。请求未带时长时用 B 站 `page_info.duration` 兜底。
+6. 硬过滤（打分前）：
+   - 直接丢弃 `instrumental=true` 或曲名含 `伴奏 / 纯音乐 / off vocal / inst / karaoke` 的条目；
+   - 直接丢弃 `syncedLyrics` 与 `plainLyrics` 都为空的条目；
+   - 标题解析出的歌手与记录歌手都已知且 `artist_score == 0`（UP 主也对不上）时拒绝；
+   - 两侧时长都已知且差 > 45s 时拒绝。
+7. 接受条件：总分 ≥ **0.62** 且 track 分 ≥ **0.7**。排序：总分降序 → 有可解析
+   `syncedLyrics` 优先 → 时长更近 → id 小；前 3 条依次尝试，某条没有可用歌词时自动看次选。
+8. `q=` 与各候选查询的结果合并、按 id 去重后**全局择优**，不再「先到先得」。
+9. 结果里必须带上 `matched`（歌名、歌手、时长、LRCLIB id），界面要显示——选错歌时用户能看出来并自己改。
+
+### LRCLIB 查询与缓存
+
+- 每首歌最多 4 条查询并行；单请求仍 6s 超时，整轮总预算 7s，超时未完成的查询取消，
+  已完成的结果照常参与择优。全局并发上限 4，429/5xx 仍不重试。
+- 查询结果只驻内存（不落盘）：正结果缓存 1 小时、空结果 10 分钟，最多 128 条；
+  同一组查询参数的在途请求会合并，不同视频的同一首歌不会重复打 LRCLIB。
+- 换源面板复用最近 5 分钟的解析快照（B 站轨道、LRCLIB 匹配结果），resolve 后紧接着
+  打开换源不会重复请求。
 
 ## B 站字幕
 
@@ -96,23 +115,50 @@ B 站标题是给人看的，不是给曲库搜的（实测 `【纯享版】孤�
 | 内容 | 路径 | 说明 |
 | --- | --- | --- |
 | 用户导入的 LRC | `CONFIG_DIR/lyrics/<bvid>.lrc` | 永久；统一按 UTF-8 写入 |
-| 用户偏好 | `CONFIG_DIR/lyrics/<bvid>.json` | `{offset, pin: {source, id}}`，`source ∈ local/bili/lrclib/demo` |
+| 用户偏好 | `CONFIG_DIR/lyrics/<bvid>.json` | `{offset, offset_mode, pin: {source, id}}`，`offset_mode ∈ auto/manual`，`source ∈ local/bili/lrclib/demo` |
 | 抓取缓存 | `CACHE_DIR/lyrics/<bvid>.json` | 命中缓存 30 天、未命中缓存 6 小时 |
 | 演示歌词 | 代码常量 | 不落盘、不联网 |
 
 - `bvid` 必须匹配 `^[A-Za-z0-9]{1,24}$`，否则接口返回 400，任何情况下都不拼路径。
-- 缓存键是 `bvid`；缓存内容带 `v`（结构版本），版本不符直接丢弃。
+- 缓存键是 `bvid`；缓存内容带 `v`（结构版本，当前为 2），版本不符直接丢弃。
 - `disabled` / `not_logged_in` 的空结果不写缓存（开关 / 登录态会变，缓存会遮蔽新结果）。
 - 有 `pin` 时跳过缓存读取，每次都真正尝试 pin；非 pin 来源的降级结果也不写缓存。
 - 同一 `bvid` 的解析用锁合并并发请求，避免切歌/重试时重复打 LRCLIB；锁表过大时清理已释放的锁。
-- `refresh=1` 绕过缓存；只清缓存，不动用户本地文件与偏好。
+- `refresh=1` 绕过缓存与 LRCLIB 查询缓存，重新匹配并重新校准；只清缓存，不动用户本地文件与偏好。
 
-## 偏移
+## 偏移与自动校准
 
 - 单位秒，范围 `[-30, +30]`，步进 `0.5`。
 - 显示与跳转都用 `t + offset`；服务端返回原始 `lines` 与 `offset` 两个字段，由客户端相加。
 - 按 `bvid` 持久化在用户偏好里，切歌回来仍然生效。
 - 只有 `synced=true` 时界面才显示偏移控件。
+
+### 自动校准
+
+当最终来源是 LRCLIB、`synced=true`，且本视频有 B 站字幕（人工或 AI）时，用两侧歌词行
+对齐估计一个整首固定偏移：
+
+1. 行文本归一化：NFKC、小写，只保留字母 / 数字 / CJK；长度 < 3 的行跳过；两侧等距抽样
+   （参考最多 120 行、候选最多 400 行）。
+2. 在 `-30 … +30s` 内按 `0.5s` 步长遍历：每条 LRCLIB 行按 `t + offset` 在字幕时间表中
+   查找 `±1.5s` 窗口，取窗口内文本二元组相似度最高且 ≥ 0.55 的字幕行。
+3. 只保留匹配行数 ≥ `max(8, ceil(0.35 × 参考行数))` 且平均相似度 ≥ 0.60 的偏移；
+   同分取平均时间误差更小者。
+4. 峰值显著性：距最优 3s 以外的最高分必须比最优低 ≥ 0.08（防止副歌重复导致双峰误判）；
+   0 偏移分数距最优 < 0.03 时取 0，避免 0.5–1.5s 抖动。
+5. 置信度 = `0.5 × 平均相似度 + 0.5 × 匹配比例`；不满足门槛就不校准，保持原偏移。
+
+触发与共存：
+
+- 人工字幕存在时阶梯不会走到 LRCLIB，因此校准主要使用 AI 字幕，也覆盖用户 pin LRCLIB 的情况。
+- AI 字幕与 LRCLIB 搜索并行预取；LRCLIB 未命中时这份字幕直接作为 AI 兜底，不重复下载。
+- 校准只在 `offset_mode=auto` 时覆盖偏移并持久化；`manual` 模式只把候选值写进
+  `meta.auto_offset` / `meta.auto_offset_confidence`，绝不覆盖用户手动设置。
+- 用户手动调偏（`POST /prefs` 带非零 `offset`、界面 ±0.5s）写入 `offset_mode=manual`；
+  `offset=0` 例外，视为 `auto`，下次解析可重新校准。`POST /prefs {offset_mode:"auto"}`
+  偏移归零并恢复自动校准。
+- 旧偏好文件没有 `offset_mode`：非零偏移按 `manual` 迁移，零偏移按 `auto`。
+- 结果 `meta.offset_source` 为 `auto` / `manual` / `""`，界面据此显示「自动校准」或「手动」徽标。
 
 ## 服务端接口
 
@@ -126,13 +172,16 @@ B 站标题是给人看的，不是给曲库搜的（实测 `【纯享版】孤�
   "source": "lrclib",
   "source_label": "LRCLIB",
   "synced": true,
-  "offset": 0.0,
+  "offset": 3.5,
   "lines": [{"t": 12.34, "text": "执念的鱼"}],
   "meta": {
     "matched": {"id": 31664182, "track": "夜航星", "artist": "不才", "duration": 304},
     "available": {"local": false, "bili": "ai", "lrclib": true},
     "cached": false,
-    "pin": null
+    "pin": null,
+    "offset_source": "auto",
+    "auto_offset": 3.5,
+    "auto_offset_confidence": 0.87
   },
   "reason": ""
 }
@@ -143,6 +192,8 @@ B 站标题是给人看的，不是给曲库搜的（实测 `【纯享版】孤�
 `not_logged_in` 表示 B 站字幕开着但未登录且最终没有歌词（即使在线源开着但没匹配到）。
 `meta.pin` 是当前锁定的来源（`{source, id}` 或 `null`），`ok` / `none` 与缓存命中都会带，
 前端据此显示已锁定的来源。
+`meta.offset_source` 为 `auto` / `manual` / `""`；`auto_offset` 与
+`auto_offset_confidence` 是本次校准结果（手动模式下也返回，便于排查）。
 
 `source` 与 `source_label`：
 
@@ -158,8 +209,8 @@ B 站标题是给人看的，不是给曲库搜的（实测 `【纯享版】孤�
 | GET | `/api/lyrics/{bvid}` | `?title=&upper=&duration=&refresh=0` | 解析并返回；永远 200（bvid 非法才 400） |
 | POST | `/api/lyrics/{bvid}` | `{"lrc": "..."}` | 导入本地 LRC，返回 local 结果；超过 256 KB 返回 400 |
 | DELETE | `/api/lyrics/{bvid}` | — | 删除本地 LRC 与缓存 |
-| POST | `/api/lyrics/{bvid}/prefs` | `{"offset": 0.5, "pin_source": "bili", "pin_id": null}` | 三字段都可省略；传 `null` 表示清除。`lrclib` 必须带 `pin_id`；`bili` 可以只锁来源（内部人工优先、AI 兜底） |
-| GET | `/api/lyrics/{bvid}/sources` | `?title=&upper=&duration=` | 换源菜单：各来源可用性与标签 |
+| POST | `/api/lyrics/{bvid}/prefs` | `{"offset": 0.5, "offset_mode": "manual", "pin_source": "bili", "pin_id": null}` | 四字段都可省略；传 `null` 表示清除。带非零 `offset` 即写 `manual`（`offset=0` 例外，视为恢复 `auto`）；`offset_mode:"auto"` 会把偏移归零并恢复自动校准。`lrclib` 必须带 `pin_id`；`bili` 可以只锁来源（内部人工优先、AI 兜底） |
+| GET | `/api/lyrics/{bvid}/sources` | `?title=&upper=&duration=` | 换源菜单：各来源可用性与标签；5 分钟内复用最近解析快照 |
 | GET | `/api/lyrics/search` | `?q=关键词` | LRCLIB 搜索，最多 10 条 |
 | POST | `/api/lyrics/{bvid}/use` | `{"id": 31664182}` | 采用某条 LRCLIB 候选并锁定 |
 
@@ -265,7 +316,8 @@ B 站标题是给人看的，不是给曲库搜的（实测 `【纯享版】孤�
 - LRCLIB 只收到清洗后的歌名、歌手文本；**不发 Cookie、不发账号信息、不发 Referer**。
   LRCLIB 请求使用独立 HTTP 客户端（网页版服务端与安卓各一个），绝不与 B 站客户端共用。
 - LRCLIB User-Agent：`BiliMuse/<VERSION> (https://github.com/Jackiechen259/bilimuse)`。
-- LRCLIB 超时 6 秒；429/5xx 直接降级并缓存「未命中」，不做重试轰炸。
+- LRCLIB 超时 6 秒；429/5xx 直接降级并缓存「未命中」，不做重试轰炸。查询按歌并行最多 4 条，
+  全局并发上限 4、整轮预算 7 秒；结果只驻内存、不落盘，进程重启即失效。
 - B 站字幕 URL 必须过白名单，防止接口被篡改后把服务端当代理；校验后按解析出的
   scheme/host/path 重建 URL，拒绝 userinfo 与非 ASCII / 带反斜杠的 host。
 - 字幕下载不跟随重定向（任何 3xx 直接拒绝），响应体上限 4 MB；LRCLIB 响应同样限 4 MB。
@@ -280,14 +332,20 @@ TV 布局、改动 BTR 与音轨选择。
 
 服务端与安卓各实现一份，用例对齐：
 
-- LRC：BOM + CRLF、多时间戳、`[offset:]`、毫秒精度、乱序、空行、无时间标签、GBK。
-- 清洗：`【4K】夜航星 - 不才`、`《起风了》买辣椒也用券`、`孤勇者（Live版）`。
-- 打分：完全匹配、包含匹配、instrumental 排除、时长差惩罚、阈值边界。
+- LRC：BOM + CRLF、多时间戳、多个 `[offset:]`（取最后一个）、毫秒精度、乱序、空行、无时间标签、GBK。
+- 清洗：`【4K】夜航星 - 不才`、`《起风了》买辣椒也用券`、`孤勇者（Live版）`、
+  `「残酷な天使のテーゼ」高橋洋子`、`孤勇者 feat. 陈奕迅`、`歌手 - 歌名` 反向候选。
+- 打分：完全匹配、包含匹配、instrumental / 伴奏标题排除、无歌词记录跳过、歌手冲突门控、
+  45s 时长硬过滤边界、同步歌词 tie-break、时长差惩罚、阈值边界、`A feat. B` 歌手拆分。
+- 查询：计划顺序 / 去重 / 上限、并行聚合与部分失败、预算取消、全局择优、无歌词次选、
+  查询缓存 TTL 与在途合并、换源快照零额外请求。
+- 校准：合成数据 +3.5s / −7.0s / +29.5s / 0s、噪声行、双峰拒绝、少于 8 行拒绝、
+  自动应用与手动优先、`offset_mode` 迁移、缓存命中保持偏移、`refresh` 重新校准。
 - 阶梯：本地优先、pin 生效、关闭 `lyrics_online` 后不请求 LRCLIB、关闭 `lyrics_bili` 后不请求字幕；未登录且没有歌词时 `reason=not_logged_in`。
 - 缓存：命中不请求、`refresh` 强制刷新、未命中缓存 6 小时、`disabled` / `not_logged_in` 不缓存、pin 存在时不被缓存短路。
 - 演示模式：零网络。
-- 安全：LRCLIB 请求头里没有 `Cookie`；非法 bvid 400；字幕 URL 白名单拒绝外域 / userinfo / 反斜杠与非 ASCII host、拒绝 3xx，响应体超 4 MB 拒绝。
-- 接口：7 个端点的正常与错误路径、导入超限、删除、偏移 clamp、设置往返。
+- 安全：LRCLIB 请求头里没有 `Cookie`；非法 bvid 400；字幕 URL 白名单拒绝外域 / userinfo / 反斜杠与非 ASCII host、拒绝 3xx，响应体超 4 MB 拒绝（LRCLIB 同样 4 MB）。
+- 接口：7 个端点的正常与错误路径、导入超限、删除、偏移 clamp、`offset_mode` 往返、设置往返。
 
 ## 已实现文件索引
 
@@ -295,8 +353,9 @@ TV 布局、改动 BTR 与音轨选择。
 
 - `bilimuse/lyrics.py`：`LyricsService`（`resolve` / `sources` / `search` / `use_lrclib` /
   `import_lrc` / `delete` / `update_prefs`）、`parse_lrc_text` / `parse_lrc_bytes` /
-  `parse_lrc_file`、`clean_title`、`title_candidates`、`score_record` / `pick_match`、
-  `subtitle_lines`、`demo_lines`、`is_valid_bvid` / `clamp_offset`；
+  `parse_lrc_file`、`clean_title`、`title_candidates`、`query_plan`、`score_record` /
+  `rank_matches` / `pick_match`、`subtitle_lines`、`demo_lines`、`is_valid_bvid` / `clamp_offset`；
+- `bilimuse/lyrics_offset.py`：`estimate_offset`（自动偏移校准纯函数）；
 - `bilimuse/api.py`：`BiliClient.subtitle_tracks` / `subtitle_body`，以及模块级
   `subtitle_url`（字幕 URL 白名单）；
 - `bilimuse/server.py`：7 个 `/api/lyrics` 路由（`GET` / `POST` / `DELETE /api/lyrics/{bvid}`、
@@ -318,8 +377,9 @@ TV 布局、改动 BTR 与音轨选择。
 - `data/LyricsModels.kt`：`LyricsLine` / `LyricsResult` / `LyricsMeta` / `LyricsMatched` /
   `LyricsAvailable` / `LyricsCandidate` / `LyricsSourceOption` / `LyricsPrefs`；
 - `data/LyricsLrc.kt`：LRC 解析与编码回退；
-- `data/LyricsMatch.kt`：标题清洗、候选与打分；
-- `data/LyricsRepository.kt`：来源阶梯、本地文件、缓存、LRCLIB、B 站字幕与偏好；
+- `data/LyricsMatch.kt`：标题清洗、候选、查询计划、打分与硬过滤；
+- `data/LyricsOffset.kt`：自动偏移校准纯函数（与 Python 同一套常量）；
+- `data/LyricsRepository.kt`：来源阶梯、本地文件、缓存、并行 LRCLIB、B 站字幕、校准与偏好；
 - `ui/LyricsPanel.kt`：`LyricsPanel` 及工具行 / 列表 / 空态 / 回到当前；
 - `MainViewModel.kt`：`LyricsUiState`、`lyrics: StateFlow<LyricsUiState>`，以及
   `toggleLyrics` / `openLyrics` / `closeLyrics` / `reloadLyrics` / `setLyricsOffset` /
@@ -327,6 +387,6 @@ TV 布局、改动 BTR 与音轨选择。
 
 测试：
 
-- `tests/test_lyrics.py`、`tests/test_lyrics_api.py`；
+- `tests/test_lyrics.py`、`tests/test_lyrics_api.py`、`tests/test_lyrics_offset.py`；
 - `android/app/src/test/kotlin/com/bilimuse/app/data/LyricsLrcTest.kt`、
-  `LyricsMatchTest.kt`、`LyricsRepositoryTest.kt`。
+  `LyricsMatchTest.kt`、`LyricsOffsetTest.kt`、`LyricsRepositoryTest.kt`。

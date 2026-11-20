@@ -25,6 +25,8 @@ data class LyricsResult(
     val sourceLabel: String = "",
     val synced: Boolean = false,
     val offsetMs: Long = 0L,
+    /** 当前偏移来源：`auto` / `manual` / 空串。 */
+    val offsetSource: String = "",
     val lines: List<LyricsLine> = emptyList(),
     val meta: LyricsMeta = LyricsMeta(),
     /** `not_found` / `disabled` / `not_logged_in` / `timeout` / `error`。 */
@@ -56,6 +58,9 @@ data class LyricsMeta(
     val matched: LyricsMatched? = null,
     val available: LyricsAvailable = LyricsAvailable(),
     val cached: Boolean = false,
+    /** 本次自动校准算出的偏移（毫秒）；未校准时为 null。 */
+    val autoOffsetMs: Long? = null,
+    val autoOffsetConfidence: Double? = null,
 )
 
 /** 匹配信息：选错歌时用户要能看出并自己改。 */
@@ -86,6 +91,8 @@ data class LyricsCandidate(
     val duration: Int = 0,
     val instrumental: Boolean = false,
     val synced: Boolean = false,
+    /** 是否至少有 synced/plain 歌词；默认 true 兼容旧调用方。 */
+    val hasLyrics: Boolean = true,
 )
 
 /** 换源菜单里的一项。 */
@@ -107,6 +114,8 @@ data class LyricsSourceOption(
 @Serializable
 data class LyricsPrefs(
     val offsetMs: Long = 0L,
+    /** `auto` 系统可覆盖；`manual` 用户手动值。空串表示旧文件，读取时迁移。 */
+    val offsetMode: String = "",
     /** `local` / `bili` / `lrclib` / `demo`，null 表示未锁定。 */
     val pinSource: String? = null,
     /** 锁定到某条 LRCLIB 候选时使用。 */

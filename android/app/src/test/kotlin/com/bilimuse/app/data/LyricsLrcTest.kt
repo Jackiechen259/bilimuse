@@ -56,6 +56,14 @@ class LyricsLrcTest {
     }
 
     @Test
+    fun multipleOffsetTagsUseTheLastOneLikePython() {
+        val result = LyricsLrc.parse(
+            "[offset:500]\n[00:10.00]A\n[offset:-1000]\n[00:20.00]B",
+        )
+        assertEquals(listOf(9_000L, 19_000L), result.lines.map { it.timeMs })
+    }
+
+    @Test
     fun negativeTimestampsAfterOffsetClampToZero() {
         val result = LyricsLrc.parse("[offset:-10000]\n[00:05.00]A")
         assertEquals(0L, result.lines.single().timeMs)

@@ -2932,6 +2932,20 @@ html.is-windows .np-header { padding-right: 6px; }
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
 }
+.np-lyrics-offset-auto {
+  height: 21px;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.np-lyrics-offset-auto.is-auto { color: var(--accent-text); }
+.np-lyrics-offset-auto:hover { color: var(--text); }
+.np-lyrics-offset-auto:focus-visible { outline-offset: 0; }
 
 /* 歌词滚动区：隐藏滚动条但可滚；上下用 1px 细线收边 */
 .np-lyrics-scroll {

@@ -730,6 +730,7 @@ class LyricsImport(BaseModel):
 
 class LyricsPrefsPatch(BaseModel):
     offset: float | None = None
+    offset_mode: str | None = None
     pin_source: str | None = None
     pin_id: int | None = None
 
@@ -848,6 +849,8 @@ async def api_lyrics_prefs(bvid: str, payload: LyricsPrefsPatch) -> dict[str, An
     fields = payload.model_fields_set
     if "offset" in fields:
         kwargs["offset"] = payload.offset
+    if "offset_mode" in fields:
+        kwargs["offset_mode"] = payload.offset_mode
     if "pin_source" in fields:
         kwargs["pin_source"] = payload.pin_source
     if "pin_id" in fields:
