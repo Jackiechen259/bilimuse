@@ -1988,12 +1988,12 @@ function npRenderAll() {
 }
 
 /* ------------------------------------------------------------------ 详情过渡
-   打开：底部播放条的小封面先被复制一份，飞到详情页大封面的位置；外框淡入，
-   顶栏 / 走带 / 队列错峰浮入。关闭时原路飞回。
+   打开：整张详情页从底部播放条的位置向上展开——整页轻量上浮 + 淡入，
+   封面 / 曲目信息 / 走带再按样式表里的错峰延迟依次浮入。关闭时原路落回并淡出。
    动效全部走 Web Animations API，桌面壳（WebView2）和浏览器表现一致；
    系统启用「减少动态效果」时跳过，直接显示 / 隐藏。 */
 
-const NP_ENTER_MS = 200;
+const NP_ENTER_MS = 240;
 const NP_LEAVE_MS = 160;
 const NP_MOTION_EASE = 'cubic-bezier(0.22, 0.9, 0.26, 1)';
 
@@ -2176,6 +2176,11 @@ function npLandCover(flight, token) {
   flight.anim.finished.then(land, land);
 }
 
+/** 详情页上浮距离：跟随视口高度，封顶后大屏也不显得夸张。 */
+function npRiseDistance() {
+  return Math.min(Math.round(window.innerHeight * 0.03), 32);
+}
+
 function npEnterMotion(token) {
   const overlay = $('now-playing');
   npEntering = true;
@@ -2185,19 +2190,34 @@ function npEnterMotion(token) {
     npEnterTimer = null;
   }, NP_ENTER_MS + 80);
 
+  // 从下往上展开：起始帧落在底部播放条附近，上浮同时淡入。
+  // fill 用 backwards：播完后回到基础样式，不给 fixed 子孙留一个 transform 容器。
+  const rise = npRiseDistance();
   npTrackMotion(overlay.animate(
-    [{ opacity: 0 }, { opacity: 1 }],
-    { duration: 160, easing: 'ease-out', fill: 'both' },
+    [
+      { opacity: 0, transform: `translate3d(0, ${rise}px, 0) scale(0.994)` },
+      { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1)' },
+    ],
+    { duration: NP_ENTER_MS, easing: MOTION_EASE_OUT, fill: 'backwards' },
   ));
 }
 
-function npLeaveMotion(token) {
+function npLeaveMotion(token, snapshot) {
   const overlay = $('now-playing');
   overlay.classList.add('is-closing');
-  const from = getComputedStyle(overlay).opacity;
+  // 入场没播完就关闭时，从眼下这一帧接着落回，不跳回起点。
+  const current = snapshot && snapshot.overlay;
+  const fromOpacity = current ? current.opacity : getComputedStyle(overlay).opacity;
+  const fromTransform = current && current.transform && current.transform !== 'none'
+    ? current.transform
+    : 'translate3d(0, 0, 0) scale(1)';
+  const rise = npRiseDistance();
   npTrackMotion(overlay.animate(
-    [{ opacity: from }, { opacity: 0 }],
-    { duration: 160, easing: 'ease-in', fill: 'both' },
+    [
+      { opacity: fromOpacity, transform: fromTransform },
+      { opacity: 0, transform: `translate3d(0, ${rise}px, 0) scale(0.994)` },
+    ],
+    { duration: NP_LEAVE_MS, easing: MOTION_EASE_IN, fill: 'forwards' },
   ));
   npCloseTimer = setTimeout(() => npFinishClose(token), NP_LEAVE_MS + 40);
 }

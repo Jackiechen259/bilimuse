@@ -1730,14 +1730,15 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent-strong); out
   overflow: hidden;
   color: var(--text);
   background: var(--bg);
-  animation: np-in 0.2s var(--ease-out);
+  animation: np-in 0.24s var(--ease-out);
 }
 /* 打开 / 关闭详情时由 JS 接管动效，避免和上面的兜底动画叠加 */
 .now-playing.np-motion { animation: none; }
 .now-playing.is-closing { pointer-events: none; }
+/* JS 动效不可用时的兜底：与 JS 同向的轻量上浮 */
 @keyframes np-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from { opacity: 0; transform: translate3d(0, 24px, 0); }
+  to { opacity: 1; transform: none; }
 }
 
 /* 底部播放条封面放大成详情封面的飞行副本。
@@ -2167,14 +2168,24 @@ html.is-windows .np-header { padding-right: 6px; }
   font-variant-numeric: tabular-nums;
 }
 
-/* 走带 */
+/* 走带：左右两翼 + 正中播放键。两侧等宽的 1fr 让播放键始终落在进度条中心线上。 */
 .np-transport {
-  display: flex;
+  --np-transport-gap: clamp(16px, 2.6vw, 30px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
-  gap: clamp(16px, 2.6vw, 30px);
+  gap: var(--np-transport-gap);
+  width: 100%;
   margin-top: clamp(12px, 2.2vh, 24px);
 }
+.np-transport-wing {
+  display: flex;
+  align-items: center;
+  gap: var(--np-transport-gap);
+  min-width: 0;
+}
+.np-transport-wing-left { justify-content: flex-end; }
+.np-transport-wing-right { justify-content: flex-start; }
 .np-ctrl {
   width: 42px;
   height: 42px;
@@ -3511,7 +3522,7 @@ html.is-windows .np-header { padding-right: 6px; }
   .np-console { grid-column: 2; grid-row: 1; max-width: none; align-items: flex-start; }
   .np-trackline { margin-top: 0; }
   .np-progress { margin-top: 14px; }
-  .np-transport { margin-top: 8px; justify-content: flex-start; }
+  .np-transport { margin-top: 8px; }
   .np-foot { margin-top: 16px; }
   .np-eyebrow, .np-chips, .np-artist { justify-content: flex-start; }
   .np-title { margin-top: 6px; font-size: clamp(23px, 2.7vw, 30px); }
@@ -3546,7 +3557,6 @@ html.is-windows .np-header { padding-right: 6px; }
     max-width: 720px;
   }
   .now-playing.np-lyrics-open .np-progress { margin-top: 12px; }
-  .now-playing.np-lyrics-open .np-transport { justify-content: center; }
   .now-playing.np-lyrics-open .np-foot { margin-top: 12px; }
   .now-playing.np-lyrics-open .np-lyrics-list { padding-block: 88px; }
   .now-playing.np-lyrics-open .np-lyrics-line { padding: 5px 0; }
@@ -3568,7 +3578,7 @@ html.is-windows .np-header { padding-right: 6px; }
   .np-art { width: min(72vw, 250px); }
   .np-title { font-size: 23px; }
   /* 走带多了一枚「词」按钮，窄屏收紧间距，390px 宽度仍能一排放下 */
-  .np-transport { gap: 12px; }
+  .np-transport { --np-transport-gap: 12px; }
   .np-foot { flex-wrap: wrap; justify-content: center; gap: 12px; }
   .np-engine-pill { max-width: 100%; }
   .np-dock-engine { max-width: 190px; }

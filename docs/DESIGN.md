@@ -114,7 +114,7 @@ Web 令牌在 `bilimuse/web/style.css` 顶部，Android 在 `ui/Theme.kt` 的 `B
 ## 实现位置
 
 - `bilimuse/web/style.css`：三套令牌与全部组件样式
-- `bilimuse/web/app.js`：主题切换（160ms 淡入）、详情页淡入淡出
+- `bilimuse/web/app.js`：主题切换（160ms 淡入）、详情页上浮进出（240ms / 160ms）
 - `desktop/web/index.html`：启动页的 ink 令牌副本（需与 Web 保持同步）
 - `android/.../ui/Theme.kt`：`AppTheme`、三套 `BiliPalette`、`BiliMuseTheme`
 - `android/.../ui/Motion.kt`：动效令牌与 reduced-motion 降级
