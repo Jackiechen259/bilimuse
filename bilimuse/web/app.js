@@ -3929,7 +3929,7 @@ function syncSettingsUi() {
   if ($('btr-options')) $('btr-options').classList.toggle('is-disabled', !enabled);
   if ($('btr-chunk-options')) $('btr-chunk-options').classList.toggle('is-disabled', !enabled);
 
-  const version = state.version || '0.3.3';
+  const version = state.version || '0.2.6';
   ['settings-version', 'settings-version-inline'].forEach((id) => {
     const el = $(id);
     if (el) el.textContent = version;
